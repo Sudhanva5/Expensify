@@ -11,9 +11,10 @@
 import { OAuth2Client } from 'google-auth-library';
 import { prisma } from '../db/client.js';
 
+// gmail.readonly grants metadata + bodies. Don't combine with gmail.metadata —
+// Google grants only the more restrictive scope, which blocks format=FULL fetches.
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
-  'https://www.googleapis.com/auth/gmail.metadata',
 ];
 
 export interface OAuthEnv {
