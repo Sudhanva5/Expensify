@@ -11,9 +11,13 @@ struct ExpensifyApp: App {
     /// SwiftUI's lifecycle. AppDelegate handles all of it.
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
+    /// Shared store fetched from Railway. One instance, observed by every tab.
+    @State private var transactionStore = TransactionStore()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(transactionStore)
         }
     }
 }

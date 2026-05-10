@@ -11,5 +11,5 @@ enum Constants {
     /// 32+ char string. Set the *same* value on Railway as `API_TOKEN`.
     /// In production you'd put this in Keychain; for V1 it sits here so you
     /// can swap it without touching every call site.
-    static let apiToken: String = "REPLACE_ME_WITH_RANDOM_32CHAR_STRING"
+    static let apiToken: String = "55fc5bb59b40e6ec8d7d808787726c692a1ee8840b9a796596a85b801878afaa"
 }

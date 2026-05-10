@@ -3,15 +3,12 @@ import SwiftUI
 /// Root view. 3-tab TabView. Settings is presented as a sheet from any tab
 /// when the user taps the avatar in the nav bar.
 struct ContentView: View {
+    @Environment(TransactionStore.self) private var store
     @State private var selection: Tab = .home
     @State private var showSettings = false
 
     enum Tab: Hashable {
         case home, categories, activity
-    }
-
-    private var pendingReviewCount: Int {
-        MockData.transactions.filter { $0.status == .pendingReview }.count
     }
 
     var body: some View {
@@ -32,7 +29,7 @@ struct ContentView: View {
                 .tabItem {
                     Label("Activity", systemImage: selection == .activity ? "bell.fill" : "bell")
                 }
-                .badge(pendingReviewCount)
+                .badge(store.reviewItems.count)
                 .tag(Tab.activity)
         }
         .sheet(isPresented: $showSettings) {
@@ -43,4 +40,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+        .environment(TransactionStore())
 }

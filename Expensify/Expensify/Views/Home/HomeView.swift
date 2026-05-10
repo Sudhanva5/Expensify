@@ -1,12 +1,13 @@
 import SwiftUI
 
-/// First tab. Welcome, date filter, transaction log.
+/// First tab. Welcome, date filter, transaction log fed by the live API.
 struct HomeView: View {
     @Binding var showSettings: Bool
+    @Environment(TransactionStore.self) private var store
     @State private var range: DateRange = .defaultRange
 
     private var filtered: [Transaction] {
-        MockData.transactions
+        store.transactions
             .filter { range.contains($0.occurredAt) }
             .sorted { $0.occurredAt > $1.occurredAt }
     }
@@ -35,9 +36,22 @@ struct HomeView: View {
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
                 }
 
-                if filtered.isEmpty {
+                if let err = store.loadError {
                     Section {
-                        EmptyRowsView()
+                        ErrorRowView(message: err) {
+                            Task { await store.refresh() }
+                        }
+                        .listRowSeparator(.hidden)
+                    }
+                } else if store.isLoading && store.transactions.isEmpty {
+                    Section {
+                        LoadingRowView()
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    }
+                } else if filtered.isEmpty {
+                    Section {
+                        EmptyRowsView(hasAnyTransactions: !store.transactions.isEmpty)
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
                     }
@@ -50,6 +64,10 @@ struct HomeView: View {
                 }
             }
             .listStyle(.plain)
+            .refreshable { await store.refresh() }
+            .task {
+                if store.transactions.isEmpty { await store.refresh() }
+            }
             .navigationTitle("Expensify")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -62,24 +80,68 @@ struct HomeView: View {
 }
 
 private struct EmptyRowsView: View {
+    let hasAnyTransactions: Bool
     var body: some View {
         VStack(spacing: 8) {
             Image(systemName: "tray")
                 .font(.system(size: 40))
                 .foregroundStyle(.tertiary)
-            Text("No transactions in this range")
+            Text(hasAnyTransactions ? "No transactions in this range" : "No transactions yet")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Text("Try a wider window from the date filter.")
+            Text(hasAnyTransactions
+                 ? "Try a wider window from the date filter."
+                 : "Spend some money — it'll show up here once an HDFC alert lands in your inbox.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
     }
 }
 
+private struct LoadingRowView: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text("Loading transactions…")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+    }
+}
+
+private struct ErrorRowView: View {
+    let message: String
+    let retry: () -> Void
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 28))
+                .foregroundStyle(.orange)
+            Text("Couldn't load transactions")
+                .font(.subheadline.weight(.medium))
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+            Button("Retry", action: retry)
+                .buttonStyle(.bordered)
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+    }
+}
+
 #Preview {
     @Previewable @State var s = false
     return HomeView(showSettings: $s)
+        .environment(TransactionStore())
 }

@@ -9,14 +9,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        // Ask for notification permission and register for APNs as soon as the
-        // app boots. The first call shows the system prompt; subsequent calls
-        // are no-ops.
-        Task { @MainActor in
-            await PushService.shared.requestPermissionAndRegister()
-            // Also nudge the location prompt — second OS dialog the user sees.
-            LocationService.shared.requestPermission()
-        }
+        // Push + location auto-registration is DISABLED for now while we
+        // verify basic backend connectivity. Re-enable once the Push
+        // Notifications + Background Modes capabilities and the
+        // NSLocationWhenInUseUsageDescription privacy string are added in
+        // Xcode. Without those, calling requestPermission() crashes the app.
+        //
+        // Task { @MainActor in
+        //     await PushService.shared.requestPermissionAndRegister()
+        //     LocationService.shared.requestPermission()
+        // }
         return true
     }
 

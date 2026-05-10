@@ -3,10 +3,11 @@ import SwiftUI
 /// Second tab. Spending grouped by category for the selected date range.
 struct CategoriesView: View {
     @Binding var showSettings: Bool
+    @Environment(TransactionStore.self) private var store
     @State private var range: DateRange = .defaultRange
 
     private var totalsByCategory: [(category: Category, total: Decimal)] {
-        let outflows = MockData.transactions.filter {
+        let outflows = store.transactions.filter {
             $0.direction == .out && range.contains($0.occurredAt) && $0.category != nil
         }
 
@@ -51,8 +52,22 @@ struct CategoriesView: View {
                     .listRowSeparator(.hidden)
                 }
 
-                if totalsByCategory.isEmpty {
-                    EmptyCategoriesView()
+                if store.loadError != nil {
+                    EmptyCategoriesView(message: "Couldn't load. Pull down to retry.")
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                } else if store.isLoading && store.transactions.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Loading…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+                    .listRowSeparator(.hidden)
+                } else if totalsByCategory.isEmpty {
+                    EmptyCategoriesView(message: "Nothing to categorize in this range.")
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                 } else {
@@ -72,6 +87,10 @@ struct CategoriesView: View {
                 }
             }
             .listStyle(.plain)
+            .refreshable { await store.refresh() }
+            .task {
+                if store.transactions.isEmpty { await store.refresh() }
+            }
             .navigationTitle("Categories")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -98,31 +117,31 @@ struct CategoriesView: View {
 }
 
 private struct EmptyCategoriesView: View {
+    let message: String
     var body: some View {
         VStack(spacing: 8) {
             Image(systemName: "chart.pie")
                 .font(.system(size: 44))
                 .foregroundStyle(.tertiary)
-            Text("Nothing to categorize yet")
+            Text(message)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Text("Once you spend money, it'll show up here.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
     }
 }
 
-/// Pushed when you tap a category row — shows just transactions in that
-/// category for the same date range.
+/// Pushed when you tap a category row.
 struct CategoryDetailView: View {
     let category: Category
     let range: DateRange
+    @Environment(TransactionStore.self) private var store
 
     private var rows: [Transaction] {
-        MockData.transactions
+        store.transactions
             .filter { $0.category == category && $0.direction == .out && range.contains($0.occurredAt) }
             .sorted { $0.occurredAt > $1.occurredAt }
     }
@@ -140,4 +159,5 @@ struct CategoryDetailView: View {
 #Preview {
     @Previewable @State var s = false
     return CategoriesView(showSettings: $s)
+        .environment(TransactionStore())
 }
