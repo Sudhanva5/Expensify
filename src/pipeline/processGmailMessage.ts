@@ -31,6 +31,12 @@ export type ProcessOutcome =
       gmailMessageId: string;
       transactionId: string;
       template: string;
+      amountInr: number;
+      currency: string;
+      merchantRaw: string;
+      vpa: string | null;
+      direction: 'in' | 'out';
+      instrument: string;
       pickedCategory: string | null;
       confidence: number | null;
       status: 'auto_resolved' | 'needs_review';
@@ -101,11 +107,20 @@ export async function processGmailMessage(
   const needsLocation =
     !parseResult.data.isAutopay && parseResult.data.direction === 'out';
 
+  const inrMinor =
+    parseResult.data.amountInrMinor ?? parseResult.data.amountMinor;
+
   return {
     kind: 'processed',
     gmailMessageId: msg.id,
     transactionId: upsert.id,
     template: parseResult.data.template,
+    amountInr: Number(inrMinor) / 100,
+    currency: parseResult.data.currency,
+    merchantRaw: parseResult.data.merchantRaw,
+    vpa: parseResult.data.vpa,
+    direction: parseResult.data.direction,
+    instrument: parseResult.data.instrument,
     pickedCategory: categorization.picked?.category ?? null,
     confidence: categorization.picked?.confidence ?? null,
     status: categorization.status,

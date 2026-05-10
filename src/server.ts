@@ -9,6 +9,7 @@ import Fastify from 'fastify';
 import sensible from '@fastify/sensible';
 import { gmailWebhookRoute } from './server/routes/gmailWebhook.js';
 import { healthRoute } from './server/routes/health.js';
+import { scheduleWatchRefresh } from './server/cron.js';
 
 export async function buildServer() {
   const app = Fastify({
@@ -32,8 +33,11 @@ const isDirectRun = process.argv[1]?.endsWith('/server.ts');
 if (isDirectRun) {
   const port = Number(process.env['PORT'] ?? 3000);
   buildServer()
-    .then((app) => app.listen({ port, host: '0.0.0.0' }))
-    .then((addr) => console.log(`API listening on ${addr}`))
+    .then(async (app) => {
+      const addr = await app.listen({ port, host: '0.0.0.0' });
+      console.log(`API listening on ${addr}`);
+      scheduleWatchRefresh(app);
+    })
     .catch((err) => {
       console.error(err);
       process.exit(1);
