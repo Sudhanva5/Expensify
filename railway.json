@@ -1,7 +1,8 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS"
+    "builder": "NIXPACKS",
+    "buildCommand": "echo 'No build step — running TypeScript via tsx in production'"
   },
   "deploy": {
     "startCommand": "npm run db:migrate:deploy && npm run db:seed && npm start",
