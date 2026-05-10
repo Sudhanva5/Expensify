@@ -101,7 +101,7 @@ describe('HDFC parser — Template C: CC Autopay (E-mandate)', () => {
 });
 
 describe('HDFC parser — Template D: UPI Debit', () => {
-  it('parses SRI GURU RAGHAVENDRA debit', () => {
+  it('parses SRI GURU RAGHAVENDRA debit (V1 phrasing: "has been debited")', () => {
     const result = parseHdfcEmail({
       subject: 'UPI Transaction Alert',
       body: loadFixture('upi-debit-kirana.txt'),
@@ -114,10 +114,30 @@ describe('HDFC parser — Template D: UPI Debit', () => {
     expect(result.data.template).toBe('upi_debit');
     expect(result.data.direction).toBe('out');
     expect(result.data.instrument).toBe('account_5264');
-    expect(result.data.amountMinor).toBe(9400n); // ₹94.00
+    expect(result.data.amountMinor).toBe(9400n);
     expect(result.data.merchantRaw).toBe('SRI GURU RAGHAVENDRA ENTERPRISES');
     expect(result.data.vpa).toBe('q201985284@ybl');
     expect(result.data.externalRef).toBe('122628179659');
+    expect(result.data.isAutopay).toBe(false);
+  });
+
+  it('parses small-amount transfer (V2 phrasing: "is debited from your account ending")', () => {
+    const result = parseHdfcEmail({
+      subject: 'You have done a UPI transaction',
+      body: loadFixture('upi-debit-sneha-v2.txt'),
+      receivedAt: new Date('2026-05-10T11:00:00Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.template).toBe('upi_debit');
+    expect(result.data.direction).toBe('out');
+    expect(result.data.instrument).toBe('account_5264');
+    expect(result.data.amountMinor).toBe(100n); // ₹1.00
+    expect(result.data.merchantRaw).toBe('SNEHA R'); // parens stripped
+    expect(result.data.vpa).toBe('s.neha2003rajesh@okhdfcbank');
+    expect(result.data.externalRef).toBe('649671105479');
     expect(result.data.isAutopay).toBe(false);
   });
 });
