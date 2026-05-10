@@ -15,6 +15,7 @@ import {
 import { authorizedClient } from '../../gmail/oauth.js';
 import { processGmailMessage } from '../../pipeline/processGmailMessage.js';
 import { buildCategorizeContextFromDb } from '../../db/categorizeContext.js';
+import { requestLocationFromAllDevices } from '../../services/apns.js';
 import {
   HttpGroqCategorizer,
   type GroqCategorizer,
@@ -107,7 +108,14 @@ export async function gmailWebhookRoute(app: FastifyInstance): Promise<void> {
     for (const msg of messages) {
       const outcome = await processGmailMessage(msg, ctx);
       app.log.info({ outcome }, 'gmail message processed');
-      // TODO: if outcome.kind === 'processed' && outcome.needsLocation, send silent APNs push
+
+      // Fire a silent push so the iOS app can attach the user's current GPS
+      // to this transaction. Best-effort: never blocks the pipeline.
+      if (outcome.kind === 'processed' && outcome.needsLocation) {
+        void requestLocationFromAllDevices(outcome.transactionId).catch((err) =>
+          app.log.error({ err, txId: outcome.transactionId }, 'APNs location request failed'),
+        );
+      }
     }
 
     if (latestHistoryId) await persistLatestHistoryId(latestHistoryId);
