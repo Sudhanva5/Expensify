@@ -1,0 +1,157 @@
+// Tier 3 — Groq categorization. Defined as an interface so it can be mocked
+// in tests; the HTTP implementation is supplied at runtime.
+
+import { z } from 'zod';
+import { CATEGORIES, type CategoryName } from './types.js';
+import type { BraveSearchResult } from './brave.js';
+
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+
+export interface GroqCategorizeInput {
+  merchantRaw: string;
+  merchantNormalized: string;
+  vpa: string | null;
+  amountInr: number; // major units (rupees)
+  occurredAt: Date;
+  direction: 'in' | 'out';
+  instrument: string;
+  isAutopay: boolean;
+  // Optional Tier-4 grounding: web search results about the merchant.
+  webContext?: BraveSearchResult[];
+}
+
+export interface GroqCategorizeOutput {
+  category: CategoryName | null;
+  confidence: number;
+  rationale: string;
+}
+
+export interface GroqCategorizer {
+  categorize(input: GroqCategorizeInput): Promise<GroqCategorizeOutput>;
+}
+
+// === Prompt builder ===
+
+export function buildGroqPrompt(input: GroqCategorizeInput): string {
+  const ist = new Date(input.occurredAt.getTime() + IST_OFFSET_MS);
+  const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][ist.getUTCDay()];
+  const date = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
+  const time = `${pad(ist.getUTCHours())}:${pad(ist.getUTCMinutes())}`;
+
+  const webSection =
+    input.webContext && input.webContext.length > 0
+      ? `\nWeb search results about this merchant (use these to identify what kind of business it is):
+${input.webContext
+  .map((r, i) => `${i + 1}. ${r.title}\n   ${r.snippet}`)
+  .join('\n')}\n`
+      : '';
+
+  return `You are a transaction categorizer for an Indian personal finance app.
+
+Categorize this transaction into exactly ONE of these categories, or null if you cannot reasonably categorize:
+${CATEGORIES.map((c) => `- ${c}`).join('\n')}
+
+Transaction:
+- Merchant (raw): "${input.merchantRaw}"
+- Merchant (cleaned): "${input.merchantNormalized}"
+- UPI VPA: ${input.vpa ? `"${input.vpa}"` : 'none'}
+- Amount: ₹${input.amountInr.toFixed(2)}
+- When: ${dayName} ${date} ${time} IST
+- Direction: ${input.direction === 'out' ? 'outgoing spend' : 'incoming credit'}
+- Instrument: ${input.instrument}
+- Auto-pay: ${input.isAutopay ? 'yes' : 'no'}
+${webSection}
+Indian context hints:
+- Personal UPI handles: @oksbi, @okaxis, @okhdfcbank, @okicici. Local-part shaped like a person's name = Personal Transfer.
+- Merchant UPI handles: @ybl with q-prefix usually means a small business.
+- Suffixes like "ENTERPRISES", "STORES", "TRADERS", "AGENCIES", "MART", "GENERAL STORES" typically indicate retail/grocery shops.
+- BUNDL TECHNOLOGIES = Swiggy; ANI TECHNOLOGIES = Ola; ZERODHA / GROWW = Investments; IRCTC = Travel.
+
+Respond with JSON only — no markdown, no preamble:
+{
+  "category": "<exact category name from the list, or null>",
+  "confidence": <number between 0 and 1>,
+  "rationale": "<one short sentence>"
+}`;
+}
+
+function pad(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+// === Response validation ===
+
+export const groqResponseSchema = z.object({
+  category: z.union([z.enum(CATEGORIES), z.null()]),
+  confidence: z.number().min(0).max(1),
+  rationale: z.string().max(500),
+});
+
+// Lenient parse: returns a safe "no signal" output on validation failure
+// rather than throwing, so a bad LLM response degrades gracefully.
+export function parseGroqResponse(content: string): GroqCategorizeOutput {
+  let json: unknown;
+  try {
+    json = JSON.parse(content);
+  } catch {
+    return { category: null, confidence: 0, rationale: 'invalid JSON from model' };
+  }
+  const parsed = groqResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { category: null, confidence: 0, rationale: 'response did not match schema' };
+  }
+  return parsed.data;
+}
+
+// === HTTP implementation ===
+
+export interface HttpGroqOptions {
+  apiKey: string;
+  model?: string;
+  fetchFn?: typeof fetch;
+}
+
+export class HttpGroqCategorizer implements GroqCategorizer {
+  private readonly apiKey: string;
+  private readonly model: string;
+  private readonly fetchFn: typeof fetch;
+
+  constructor(opts: HttpGroqOptions) {
+    this.apiKey = opts.apiKey;
+    this.model = opts.model ?? 'llama-3.1-8b-instant';
+    this.fetchFn = opts.fetchFn ?? fetch;
+  }
+
+  async categorize(input: GroqCategorizeInput): Promise<GroqCategorizeOutput> {
+    const prompt = buildGroqPrompt(input);
+    const res = await this.fetchFn('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: this.model,
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+        temperature: 0.2,
+        max_tokens: 200,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`Groq API error ${res.status}: ${body}`);
+    }
+
+    const data = (await res.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      return { category: null, confidence: 0, rationale: 'empty response from model' };
+    }
+
+    return parseGroqResponse(content);
+  }
+}

@@ -1,0 +1,243 @@
+// Expense Solver — V1 schema
+// See CLAUDE.md for the design behind these tables.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Transactions
+// ============================================================
+
+model Transaction {
+  id String @id @default(cuid())
+
+  // Money — stored in minor units (paise for INR, cents for USD/EUR) as BigInt to avoid float drift
+  amountMinor       BigInt
+  currency          String   @default("INR")
+  amountInrMinor    BigInt?
+  bankConvertedRate Decimal? @db.Decimal(12, 6)
+  marketRate        Decimal? @db.Decimal(12, 6)
+  fxMarkupPct       Decimal? @db.Decimal(6, 3)
+
+  // What & when
+  merchantRaw        String
+  merchantNormalized String
+  vpa                String?
+  occurredAt         DateTime
+  direction          Direction
+  instrument         String
+
+  // Source & idempotency
+  gmailMessageId String   @unique
+  emailTemplate  String
+  parserVersion  String
+  rawSubject     String
+  rawSnippet     String
+
+  // Location
+  locationLat    Decimal?       @db.Decimal(10, 7)
+  locationLng    Decimal?       @db.Decimal(10, 7)
+  locationStatus LocationStatus @default(awaiting)
+
+  // Categorization
+  category      Category? @relation(fields: [categoryId], references: [id])
+  categoryId    String?
+  confidence    Decimal?  @db.Decimal(4, 3)
+  signalSource  String?
+  matchedRuleId String?
+  status        TxStatus  @default(awaiting_location)
+  autoFinalized Boolean   @default(false)
+
+  tags TransactionTag[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([occurredAt])
+  @@index([categoryId, occurredAt])
+  @@index([merchantNormalized])
+  @@index([status])
+}
+
+enum Direction {
+  in
+  out
+}
+
+enum LocationStatus {
+  awaiting
+  fulfilled
+  missed
+  not_applicable
+}
+
+enum TxStatus {
+  awaiting_location
+  pending_review
+  resolved
+}
+
+// ============================================================
+// Categories & Tags
+// ============================================================
+
+model Category {
+  id           String            @id @default(cuid())
+  name         String            @unique
+  parentId     String?
+  parent       Category?         @relation("CategoryParent", fields: [parentId], references: [id])
+  children     Category[]        @relation("CategoryParent")
+  transactions Transaction[]
+  budgets      Budget[]
+  patterns     MerchantPattern[]
+  rules        UserRule[]
+  aliases      MerchantAlias[]
+}
+
+model Tag {
+  id           String           @id @default(cuid())
+  name         String           @unique
+  transactions TransactionTag[]
+}
+
+model TransactionTag {
+  transactionId String
+  tagId         String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  tag           Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([transactionId, tagId])
+}
+
+// ============================================================
+// Merchant resolution
+// ============================================================
+
+model MerchantAlias {
+  id         String    @id @default(cuid())
+  rawPattern String    @unique
+  canonical  String
+  category   Category? @relation(fields: [categoryId], references: [id])
+  categoryId String?
+  matchType  String    @default("exact") // "exact" | "substring" | "regex"
+  notes      String?
+}
+
+model MerchantPattern {
+  id                 String   @id @default(cuid())
+  merchantNormalized String   @unique
+  category           Category @relation(fields: [categoryId], references: [id])
+  categoryId         String
+  hitCount           Int      @default(1)
+  autoTagActive      Boolean  @default(false)
+  firstSeenAt        DateTime @default(now())
+  lastConfirmedAt    DateTime @default(now())
+}
+
+// ============================================================
+// User rule engine
+// ============================================================
+
+model UserRule {
+  id                String   @id @default(cuid())
+  name              String
+  priority          Int      @default(100)
+  enabled           Boolean  @default(true)
+  conditions        Json
+  category          Category @relation(fields: [categoryId], references: [id])
+  categoryId        String
+  defaultConfidence Decimal  @default(0.6) @db.Decimal(4, 3)
+  hitCount          Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// ============================================================
+// Budgets & alerts
+// ============================================================
+
+model Budget {
+  id              String             @id @default(cuid())
+  category        Category           @relation(fields: [categoryId], references: [id])
+  categoryId      String             @unique
+  monthlyLimitInr BigInt
+  alertThresholds Decimal[]          @db.Decimal(4, 3)
+  enabled         Boolean            @default(true)
+  alerts          BudgetAlertFired[]
+}
+
+model BudgetAlertFired {
+  id        String   @id @default(cuid())
+  budget    Budget   @relation(fields: [budgetId], references: [id])
+  budgetId  String
+  yearMonth String
+  threshold Decimal  @db.Decimal(4, 3)
+  firedAt   DateTime @default(now())
+
+  @@unique([budgetId, yearMonth, threshold])
+}
+
+// ============================================================
+// Goals
+// ============================================================
+
+model Goal {
+  id              String   @id @default(cuid())
+  name            String
+  targetAmountInr BigInt
+  deadline        DateTime
+  createdAt       DateTime @default(now())
+}
+
+// ============================================================
+// System / health
+// ============================================================
+
+model GmailOauth {
+  id             String    @id @default(cuid())
+  refreshToken   String
+  watchExpiresAt DateTime?
+  lastHistoryId  String?
+  updatedAt      DateTime  @updatedAt
+}
+
+model DeviceToken {
+  id        String   @id @default(cuid())
+  apnsToken String   @unique
+  lastSeen  DateTime @default(now())
+}
+
+model FxRate {
+  id       String   @id @default(cuid())
+  date     DateTime @db.Date
+  currency String
+  rateInr  Decimal  @db.Decimal(12, 6)
+
+  @@unique([date, currency])
+}
+
+model ParserHealth {
+  id                String   @id @default(cuid())
+  template          String   @unique
+  lastParsedAt      DateTime
+  lastParserVersion String
+}
+
+model EmailMessage {
+  id             String    @id @default(cuid())
+  gmailMessageId String    @unique
+  kind           String
+  parsedAt       DateTime?
+  parserVersion  String?
+  rawSubject     String
+  rawSnippet     String
+  rawHeaders     Json?
+  parseError     String?
+  receivedAt     DateTime  @default(now())
+}
