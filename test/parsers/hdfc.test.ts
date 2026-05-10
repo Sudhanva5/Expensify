@@ -142,6 +142,74 @@ describe('HDFC parser — Template D: UPI Debit', () => {
   });
 });
 
+describe('HDFC parser — Template D extra: paytm-VPA merchant via account', () => {
+  it('parses ₹1000 to Avighna Enterprises via paytm@ptys', () => {
+    const result = parseHdfcEmail({
+      subject: 'UPI Transaction Alert',
+      body: loadFixture('upi-debit-paytm-merchant.txt'),
+      receivedAt: new Date('2026-05-04T11:00:00Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.amountMinor).toBe(100000n); // ₹1000.00
+    expect(result.data.merchantRaw).toBe('Avighna Enterprises');
+    expect(result.data.vpa).toBe('paytm-91206394@ptys');
+    expect(result.data.instrument).toBe('account_5264');
+    expect(result.data.externalRef).toBe('649006963172');
+  });
+});
+
+describe('HDFC parser — Template E: RuPay CC UPI debit', () => {
+  it('parses ₹80 from RuPay XX2668 to a paytm QR merchant', () => {
+    const result = parseHdfcEmail({
+      subject: 'UPI Transaction Alert',
+      body: loadFixture('cc-upi-debit-thimmegowda.txt'),
+      receivedAt: new Date('2026-04-27T11:00:00Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.template).toBe('cc_upi_debit');
+    expect(result.data.direction).toBe('out');
+    expect(result.data.instrument).toBe('card_2668');
+    expect(result.data.amountMinor).toBe(8000n); // ₹80.00
+    expect(result.data.merchantRaw).toBe('Thimmegowda Sanjeevkumar');
+    expect(result.data.vpa).toBe('paytmqr6fgl36@ptys');
+    expect(result.data.externalRef).toBe('122213614526');
+    expect(result.data.isAutopay).toBe(false);
+  });
+});
+
+describe('HDFC parser — upcoming-autopay preview is recognized and skipped', () => {
+  it('returns not_a_transaction for the heads-up email', () => {
+    const result = parseHdfcEmail({
+      subject: 'Upcoming E-mandate notification',
+      body: loadFixture('cc-autopay-upcoming-anthropic.txt'),
+      receivedAt: new Date('2026-05-10T10:00:00Z'),
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('not_a_transaction');
+  });
+
+  it('does NOT misclassify the upcoming preview as cc_autopay (the actual debit)', () => {
+    const result = parseHdfcEmail({
+      subject: '',
+      body: loadFixture('cc-autopay-upcoming-anthropic.txt'),
+      receivedAt: new Date(),
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // The crucial check: the preview must NOT come back as a successful parse
+    // (with template === cc_autopay), because then we'd insert a duplicate
+    // when the actual confirmation arrives.
+    expect(result.reason).toBe('not_a_transaction');
+  });
+});
+
 describe('HDFC parser — robustness', () => {
   it('returns no_template_match for unrelated promotional email', () => {
     const result = parseHdfcEmail({

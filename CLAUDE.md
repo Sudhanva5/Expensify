@@ -232,7 +232,10 @@ Total: **96 unit tests passing.** All logic (parser, categorization, Gmail decod
 | FX rate / currency conversion | ⏳ Schema ready | ExchangeRate-API call not yet wired |
 | Pattern learning (3× confirmations) | ⏳ Schema ready | needs `merchantPatterns.recordConfirmation()` |
 | Budget threshold computation | ⏳ Schema ready | pure-logic step, no infra needed |
-| Cron: 7 PM digest, 24 h heartbeat, 6-day watch refresh | ❌ Not started | |
+| Cron: 7 PM digest, 24 h heartbeat | ❌ Not started | |
+| Gmail watch auto-refresh (in-process, every 24h) | ✅ Done | `src/server/cron.ts` |
+| Live deployment on Railway | ✅ Done | https://expensify-production.up.railway.app |
+| End-to-end live test (real HDFC email → DB row) | ✅ Done | V1 + V2 UPI debit templates both verified on real Gmail |
 | iOS app shell (SwiftUI) | ❌ Not started | |
 | iOS silent-push location round-trip | ❌ Not started | |
 | Tinder-style swipe review UI | ❌ Not started | |

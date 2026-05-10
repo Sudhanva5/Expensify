@@ -17,6 +17,11 @@ export type ProcessOutcome =
       fromAddress: string | null;
     }
   | {
+      kind: 'skipped_not_transaction';
+      gmailMessageId: string;
+      details: string;
+    }
+  | {
       kind: 'parse_failed';
       gmailMessageId: string;
       reason: string;
@@ -63,6 +68,22 @@ export async function processGmailMessage(
   });
 
   if (!parseResult.ok) {
+    // Recognized non-transaction emails (e.g., upcoming-autopay previews)
+    // are skipped cleanly and logged as low-noise events.
+    if (parseResult.reason === 'not_a_transaction') {
+      await recordEmailMessage({
+        gmailMessageId: msg.id,
+        kind: 'hdfc_not_transaction',
+        parserVersion: parseResult.parserVersion,
+        rawSubject: msg.subject,
+        rawSnippet: msg.snippet || msg.body.slice(0, 200),
+      });
+      return {
+        kind: 'skipped_not_transaction',
+        gmailMessageId: msg.id,
+        details: parseResult.details,
+      };
+    }
     await recordEmailMessage({
       gmailMessageId: msg.id,
       kind: 'unknown_hdfc',

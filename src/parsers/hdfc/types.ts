@@ -4,11 +4,18 @@ export type EmailTemplate =
   | 'upi_credit'
   | 'cc_debit'
   | 'cc_autopay'
-  | 'upi_debit';
+  | 'upi_debit'
+  | 'cc_upi_debit';
 
 export type Direction = 'in' | 'out';
 
-export type ParseFailReason = 'no_template_match' | 'extraction_failed';
+// 'not_a_transaction' = recognized email type that doesn't represent a real
+// debit/credit (e.g., upcoming autopay preview). Caller should skip cleanly,
+// not treat as an error.
+export type ParseFailReason =
+  | 'no_template_match'
+  | 'extraction_failed'
+  | 'not_a_transaction';
 
 export interface HdfcEmailInput {
   subject: string;
