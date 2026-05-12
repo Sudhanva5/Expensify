@@ -111,6 +111,97 @@ export async function requestLocationFromAllDevices(transactionId: string): Prom
   }
 }
 
+interface VisiblePushArgs {
+  apnsToken: string;
+  title: string;
+  body: string;
+  payload?: Record<string, unknown>;
+}
+
+/// Send a visible push (alert banner + sound). Used by budget threshold
+/// alerts, the 7pm digest, etc. Unlike the silent location push, this one
+/// shows a notification on the lock screen / banner.
+export async function sendVisiblePush(args: VisiblePushArgs): Promise<boolean> {
+  const p = getProvider();
+  if (!p) return false;
+  const bundleId = process.env['APNS_BUNDLE_ID'];
+  if (!bundleId) {
+    console.warn('[APNs] APNS_BUNDLE_ID not set; skipping push');
+    return false;
+  }
+
+  const note = new apn.Notification();
+  note.topic = bundleId;
+  note.alert = { title: args.title, body: args.body };
+  note.sound = 'default';
+  note.priority = 10; // visible pushes go immediately
+  note.payload = args.payload ?? {};
+
+  try {
+    const result = await p.send(note, args.apnsToken);
+    if (result.failed.length > 0) {
+      console.error('[APNs] visible push failed:', JSON.stringify(result.failed));
+      for (const failed of result.failed) {
+        const reason = failed.response?.reason;
+        if (reason === 'BadDeviceToken' || reason === 'Unregistered') {
+          await prisma.deviceToken
+            .deleteMany({ where: { apnsToken: args.apnsToken } })
+            .catch(() => {});
+        }
+      }
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('[APNs] visible push error:', err);
+    return false;
+  }
+}
+
+interface BudgetAlertArgs {
+  categoryName: string;
+  spent: number; // rupees
+  limit: number; // rupees
+  thresholdPct: number; // 80, 100, 110...
+}
+
+/// Fan out a budget threshold push to every registered device.
+export async function sendBudgetAlertToAllDevices(args: BudgetAlertArgs): Promise<void> {
+  const devices = await prisma.deviceToken.findMany();
+  if (devices.length === 0) return;
+
+  const formatRupees = (v: number) =>
+    new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(v);
+  const spentStr = `₹${formatRupees(args.spent)}`;
+  const limitStr = `₹${formatRupees(args.limit)}`;
+
+  let title: string;
+  let body: string;
+  if (args.thresholdPct >= 110) {
+    title = `${args.categoryName} is way over budget`;
+    body = `You've spent ${spentStr} of your ${limitStr} monthly budget — ${args.thresholdPct}%.`;
+  } else if (args.thresholdPct >= 100) {
+    title = `${args.categoryName} hit your budget`;
+    body = `You've spent ${spentStr} of your ${limitStr} monthly budget.`;
+  } else {
+    title = `${args.categoryName} approaching budget`;
+    body = `You've spent ${spentStr} of your ${limitStr} monthly budget — ${args.thresholdPct}%.`;
+  }
+
+  for (const d of devices) {
+    await sendVisiblePush({
+      apnsToken: d.apnsToken,
+      title,
+      body,
+      payload: {
+        kind: 'budget_alert',
+        categoryName: args.categoryName,
+        thresholdPct: args.thresholdPct,
+      },
+    });
+  }
+}
+
 /// Cleanup hook so tests / shutdown don't leak the HTTPS connection.
 export function shutdownAPNs(): void {
   provider?.shutdown();

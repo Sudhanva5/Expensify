@@ -7,10 +7,13 @@ import CoreLocation
 ///   1. Asks the user for notification permission on first launch
 ///   2. Registers for remote notifications and ships the device token to the backend
 ///   3. When a silent push arrives, fetches GPS once and posts it to the backend
-final class PushService {
+///   4. Renders visible pushes (budget alerts) as banners even when the app
+///      is in the foreground — without the UNUserNotificationCenterDelegate
+///      hook, iOS suppresses banners while the app is active.
+final class PushService: NSObject, UNUserNotificationCenterDelegate {
     static let shared = PushService()
 
-    private init() {}
+    private override init() { super.init() }
 
     /// Called once from AppDelegate's didFinishLaunching. Asks for permission,
     /// then triggers APNs registration. Backend is told the token in
@@ -18,6 +21,8 @@ final class PushService {
     @MainActor
     func requestPermissionAndRegister() async {
         let center = UNUserNotificationCenter.current()
+        // Wire ourselves up first so foreground notifications show banners.
+        center.delegate = self
         do {
             // alert/sound/badge for future visible pushes (digest, budget breach).
             // Silent pushes don't strictly need any of these granted, but we ask
@@ -49,6 +54,19 @@ final class PushService {
             print("[PushService] failed to register device with backend: \(error)")
             #endif
         }
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    /// Render visible notifications (budget alerts) as banners even when the
+    /// app is in the foreground. Silent pushes never reach this method — they
+    /// go through the AppDelegate background-fetch hook.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .list, .sound])
     }
 
     /// Process an incoming silent push. Called from

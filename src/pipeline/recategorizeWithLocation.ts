@@ -1,26 +1,46 @@
 // Re-categorize a transaction once iOS has uploaded its location.
 //
 // Flow:
-//   1. Pull the latest row from DB (skip if already resolved or not_applicable)
+//   1. Pull the latest row from DB (skip if already alias-resolved or not an outflow)
 //   2. Query Google Places API for businesses within 100m
-//   3. Feed candidates + transaction context to Groq
-//   4. If Groq returns confidence >= 0.95, update the row:
-//        - merchantNormalized = Places display name (premium UI shows this)
+//   3. Walk the candidates; pick the first one whose `types` map to one of
+//      our V1 categories via the static mapper. The Places display name is
+//      authoritative ("MTR Hotel" not "RAJESH KUMAR"); the matched category
+//      becomes the new transaction category.
+//   4. If a match is found, update the row:
+//        - merchantNormalized = Places display name
 //        - categoryId = matched category
 //        - status = resolved (drops out of review queue)
+//        - locationLat / locationLng = Places candidate's coordinates (so the
+//          "open in Maps" tap lands on the actual storefront, not the user's
+//          approximate phone GPS)
 //   5. Otherwise leave row pending_review for the user to swipe
 //
 // Called fire-and-forget from POST /transactions/:id/location so the location
 // upload returns 200 immediately — re-categorize runs in the background.
+//
+// Why no Groq here?  Places' `types[]` is already a structured signal — Italian
+// restaurant, gas station, transit station, etc. A static type→category map is
+// faster, cheaper (zero LLM calls), and deterministic. Groq remains the
+// fallback inside the main categorization tier chain; this path only fires
+// when we have a location and want to enrich an already-ingested row.
 
 import { prisma } from '../db/client.js';
 import { buildOptionalPlacesClient } from '../services/places.js';
-import { HttpGroqCategorizer } from '../categorize/groq.js';
-
-const AUTO_TAG_THRESHOLD = 0.95;
+import {
+  mapPlacesTypesToCategory,
+  PLACES_TYPE_CONFIDENCE,
+} from '../services/placesTypeMapper.js';
+import { checkBudgetForCategory } from './budgetAlerts.js';
 
 export type RecategorizeOutcome =
-  | { updated: true; newCategory: string; newMerchant: string | null; confidence: number }
+  | {
+      updated: true;
+      newCategory: string;
+      newMerchant: string | null;
+      confidence: number;
+      matchedPlacesType: string;
+    }
   | { updated: false; reason: string };
 
 export async function recategorizeWithLocation(opts: {
@@ -30,10 +50,6 @@ export async function recategorizeWithLocation(opts: {
 }): Promise<RecategorizeOutcome> {
   const places = buildOptionalPlacesClient();
   if (!places) return { updated: false, reason: 'places_not_configured' };
-
-  const groqKey = process.env['GROQ_API_KEY'];
-  if (!groqKey) return { updated: false, reason: 'groq_not_configured' };
-  const groq = new HttpGroqCategorizer({ apiKey: groqKey });
 
   const tx = await prisma.transaction.findUnique({
     where: { id: opts.transactionId },
@@ -62,73 +78,66 @@ export async function recategorizeWithLocation(opts: {
     return { updated: false, reason: 'no_nearby_places' };
   }
 
-  // Ask Groq to pick the most likely candidate
-  const groqInput = {
-    merchantRaw: tx.merchantRaw,
-    merchantNormalized: tx.merchantNormalized,
-    vpa: tx.vpa,
-    amountInr:
-      tx.amountInrMinor !== null
-        ? Number(tx.amountInrMinor) / 100
-        : Number(tx.amountMinor) / 100,
-    occurredAt: tx.occurredAt,
-    direction: tx.direction as 'in' | 'out',
-    instrument: tx.instrument,
-    isAutopay: false,
-    placesContext: candidates,
-  };
-
-  let groqResult;
-  try {
-    groqResult = await groq.categorize(groqInput);
-  } catch (err) {
-    console.error('[recategorize] Groq call failed:', err);
-    return { updated: false, reason: 'groq_call_failed' };
+  // Walk candidates in the order Places returned them; the first one whose
+  // types map to a V1 category wins. Places typically orders by relevance
+  // / proximity, so the first hit is usually the right one. Skipping over
+  // unrecognized types lets the chosen merchant be a real storefront
+  // instead of, say, a "neighborhood" or "premise" polygon.
+  let chosen: typeof candidates[number] | undefined;
+  let match: ReturnType<typeof mapPlacesTypesToCategory> = null;
+  for (const candidate of candidates) {
+    const m = mapPlacesTypesToCategory(candidate.types);
+    if (m) {
+      chosen = candidate;
+      match = m;
+      break;
+    }
   }
-
-  if (groqResult.category === null) {
-    return { updated: false, reason: 'groq_no_category' };
+  if (!chosen || !match) {
+    return { updated: false, reason: 'no_recognized_place_type' };
   }
-
-  if (groqResult.confidence < AUTO_TAG_THRESHOLD) {
-    return { updated: false, reason: `low_confidence_${groqResult.confidence.toFixed(2)}` };
-  }
-
-  // Resolve merchant name: prefer Groq's pick if it matches one of the
-  // Places candidates exactly; otherwise fall back to the closest candidate's
-  // name; if neither, leave merchantNormalized alone.
-  const resolvedMerchant =
-    candidates.find((c) => c.name === groqResult.merchantName)?.name ??
-    candidates[0]?.name ??
-    null;
 
   const catRow = await prisma.category.findUnique({
-    where: { name: groqResult.category },
+    where: { name: match.category },
   });
   if (!catRow) {
-    return { updated: false, reason: `unknown_category_${groqResult.category}` };
+    return { updated: false, reason: `unknown_category_${match.category}` };
   }
+
+  // Fire-and-forget budget check after the category update lands (the
+  // assigned category might be different from what initial categorization
+  // picked, so we re-check budgets on the new one).
+  void checkBudgetForCategory(catRow.id).catch((err) =>
+    console.error('[budgetAlerts] check failed after recategorize:', err),
+  );
 
   await prisma.transaction.update({
     where: { id: tx.id },
     data: {
-      ...(resolvedMerchant ? { merchantNormalized: resolvedMerchant } : {}),
+      merchantNormalized: chosen.name,
       categoryId: catRow.id,
       status: 'resolved',
-      confidence: groqResult.confidence,
-      signalSource: 'brave_groq', // reuse existing enum slot; Places+Groq is conceptually the same role
+      confidence: match.confidence,
+      // Reuse existing enum slot — Places+typeMapper plays the same role
+      // as the previous Places+Groq path used to.
+      signalSource: 'brave_groq',
+      // Snap location to the Places centroid so the "open in Maps" tap
+      // lands on the storefront, not the phone's GPS.
+      locationLat: chosen.lat || tx.locationLat,
+      locationLng: chosen.lng || tx.locationLng,
       updatedAt: new Date(),
     },
   });
 
   console.log(
-    `[recategorize] resolved ${tx.id}: ${resolvedMerchant ?? '(no merchant change)'} → ${groqResult.category} (${groqResult.confidence})`,
+    `[recategorize] resolved ${tx.id}: ${chosen.name} → ${match.category} (via type "${match.matchedType}", conf ${match.confidence})`,
   );
 
   return {
     updated: true,
-    newCategory: groqResult.category,
-    newMerchant: resolvedMerchant,
-    confidence: groqResult.confidence,
+    newCategory: match.category,
+    newMerchant: chosen.name,
+    confidence: match.confidence,
+    matchedPlacesType: match.matchedType,
   };
 }

@@ -2,22 +2,33 @@ import SwiftUI
 
 /// Pushed when the user taps a budget row in Settings.
 /// Cred-style lowercase section labels, restrained typography.
+///
+/// All writes go through `BudgetStore.upsert(_:)` / `remove(_:)`, which
+/// optimistically updates local state and posts to Railway. The view holds
+/// a local draft until "save" is tapped so the user can back out cleanly.
 struct BudgetEditView: View {
-    @Binding var budget: Budget
+    let initial: Budget
+    @Environment(BudgetStore.self) private var budgetStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var draftLimit: String
+    @State private var alertAt80: Bool
+    @State private var alertAt100: Bool
+    @State private var alertAt110: Bool
+    @State private var saving: Bool = false
 
-    init(budget: Binding<Budget>) {
-        self._budget = budget
-        let raw = budget.wrappedValue.monthlyLimitInr
-        if let amount = raw {
+    init(initial: Budget) {
+        self.initial = initial
+        if let amount = initial.monthlyLimitInr {
             self._draftLimit = State(
                 initialValue: String(NSDecimalNumber(decimal: amount).intValue)
             )
         } else {
             self._draftLimit = State(initialValue: "")
         }
+        self._alertAt80 = State(initialValue: initial.alertAt80)
+        self._alertAt100 = State(initialValue: initial.alertAt100)
+        self._alertAt110 = State(initialValue: initial.alertAt110)
     }
 
     var body: some View {
@@ -45,9 +56,9 @@ struct BudgetEditView: View {
                 }
 
                 Section {
-                    Toggle("warn at 80%", isOn: $budget.alertAt80)
-                    Toggle("notify at 100%", isOn: $budget.alertAt100)
-                    Toggle("alert when over budget (110%)", isOn: $budget.alertAt110)
+                    Toggle("warn at 80%", isOn: $alertAt80)
+                    Toggle("notify at 100%", isOn: $alertAt100)
+                    Toggle("alert when over budget (110%)", isOn: $alertAt110)
                 } header: {
                     Text("alerts")
                         .font(AppFont.sectionLabel)
@@ -58,39 +69,72 @@ struct BudgetEditView: View {
                         .foregroundStyle(AppColor.textTertiary)
                 }
 
-                Section {
-                    Button(role: .destructive) {
-                        budget.monthlyLimitInr = nil
-                        draftLimit = ""
-                    } label: {
-                        Text("remove budget")
+                if initial.isSet {
+                    Section {
+                        Button(role: .destructive) {
+                            Task { await removeBudget() }
+                        } label: {
+                            Text("remove budget")
+                        }
+                        .disabled(saving)
                     }
                 }
             }
             .scrollContentBackground(.hidden)
             .background(AppColor.canvas)
         }
-        .navigationTitle(budget.category.shortName.lowercased())
+        .navigationTitle(initial.category.shortName.lowercased())
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("save") {
-                    if let value = Decimal(string: draftLimit), value > 0 {
-                        budget.monthlyLimitInr = value
-                    } else {
-                        budget.monthlyLimitInr = nil
-                    }
-                    dismiss()
+                    Task { await save() }
                 }
                 .foregroundStyle(AppColor.textPrimary)
+                .disabled(saving)
             }
         }
+    }
+
+    private func save() async {
+        saving = true
+        defer { saving = false }
+
+        // Empty or zero → treat as "remove".
+        guard let parsed = Decimal(string: draftLimit), parsed > 0 else {
+            if initial.isSet {
+                await budgetStore.remove(initial.category)
+            }
+            dismiss()
+            return
+        }
+
+        let updated = Budget(
+            id: initial.id,
+            backendId: initial.backendId,
+            category: initial.category,
+            monthlyLimitInr: parsed,
+            alertAt80: alertAt80,
+            alertAt100: alertAt100,
+            alertAt110: alertAt110,
+            enabled: initial.enabled,
+            extraThresholds: initial.extraThresholds
+        )
+        await budgetStore.upsert(updated)
+        dismiss()
+    }
+
+    private func removeBudget() async {
+        saving = true
+        defer { saving = false }
+        await budgetStore.remove(initial.category)
+        dismiss()
     }
 }
 
 #Preview {
-    @Previewable @State var b = Budget(category: .food, monthlyLimitInr: 5000)
     NavigationStack {
-        BudgetEditView(budget: $b)
+        BudgetEditView(initial: Budget(category: .food, monthlyLimitInr: 5000))
+            .environment(BudgetStore())
     }
 }

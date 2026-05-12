@@ -11,6 +11,7 @@ import { gmailWebhookRoute } from './server/routes/gmailWebhook.js';
 import { healthRoute } from './server/routes/health.js';
 import { devicesRoute } from './server/routes/devices.js';
 import { transactionsRoute } from './server/routes/transactions.js';
+import { budgetsRoute } from './server/routes/budgets.js';
 import { scheduleWatchRefresh } from './server/cron.js';
 
 export async function buildServer() {
@@ -26,6 +27,7 @@ export async function buildServer() {
   await app.register(gmailWebhookRoute, { prefix: '/webhooks' });
   await app.register(devicesRoute, { prefix: '/devices' });
   await app.register(transactionsRoute, { prefix: '/transactions' });
+  await app.register(budgetsRoute, { prefix: '/budgets' });
 
   return app;
 }

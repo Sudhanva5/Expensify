@@ -4,6 +4,7 @@ import SwiftUI
 struct CategoriesView: View {
     @Binding var showSettings: Bool
     @Environment(TransactionStore.self) private var store
+    @Environment(BudgetStore.self) private var budgetStore
     @State private var range: DateRange = .defaultRange
 
     private var totalsByCategory: [(category: Category, total: Decimal)] {
@@ -90,7 +91,8 @@ struct CategoriesView: View {
                                     CategoryRow(
                                         category: entry.category,
                                         totalSpent: entry.total,
-                                        percentageOfTotal: percentage(of: entry.total)
+                                        percentageOfTotal: percentage(of: entry.total),
+                                        budgetLimit: budgetStore.budget(for: entry.category).monthlyLimitInr
                                     )
                                 }
                                 .listRowSeparator(.hidden)
@@ -201,4 +203,5 @@ struct CategoryDetailView: View {
     @Previewable @State var s = false
     return CategoriesView(showSettings: $s)
         .environment(TransactionStore())
+        .environment(BudgetStore())
 }

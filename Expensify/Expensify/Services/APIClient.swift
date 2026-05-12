@@ -114,6 +114,97 @@ actor APIClient {
         let occurredAt: Date
     }
 
+    // MARK: - Budgets
+
+    private struct BudgetWire: Decodable {
+        let id: Int
+        let category: String
+        let monthlyLimitInr: Decimal
+        let alertThresholds: [Decimal]
+        let enabled: Bool
+    }
+
+    /// Fetch every budget currently configured on the backend.
+    func fetchBudgets() async throws -> [Budget] {
+        let wires: [BudgetWire] = try await getJSON(path: "/budgets/")
+        return wires.compactMap { wire in
+            guard let cat = Category(rawValue: wire.category) else {
+                return nil
+            }
+            let parts = Budget.fromBackendThresholds(wire.alertThresholds)
+            return Budget(
+                backendId: wire.id,
+                category: cat,
+                monthlyLimitInr: wire.monthlyLimitInr,
+                alertAt80: parts.alertAt80,
+                alertAt100: parts.alertAt100,
+                alertAt110: parts.alertAt110,
+                enabled: wire.enabled,
+                extraThresholds: parts.extras
+            )
+        }
+    }
+
+    /// Create-or-update a budget. Server treats the category name as the
+    /// natural key — one budget per category.
+    func upsertBudget(_ budget: Budget) async throws -> Budget {
+        struct Body: Encodable {
+            let monthlyLimitInr: Decimal
+            let alertThresholds: [Decimal]
+            let enabled: Bool
+        }
+        guard let limit = budget.monthlyLimitInr, limit > 0 else {
+            throw APIError.invalidResponse
+        }
+        let body = Body(
+            monthlyLimitInr: limit,
+            alertThresholds: budget.alertThresholdsForBackend,
+            enabled: budget.enabled
+        )
+
+        let encodedName = budget.category.rawValue.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed
+        ) ?? budget.category.rawValue
+
+        var req = URLRequest(url: Constants.baseURL.appendingPathComponent("/budgets/\(encodedName)"))
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try encoder.encode(body)
+
+        let (data, http) = try await HTTPClient.shared.send(req)
+        try ensure2xx(http: http, data: data)
+
+        let wire = try decoder.decode(BudgetWire.self, from: data)
+        guard let cat = Category(rawValue: wire.category) else {
+            throw APIError.invalidResponse
+        }
+        let parts = Budget.fromBackendThresholds(wire.alertThresholds)
+        return Budget(
+            id: budget.id,
+            backendId: wire.id,
+            category: cat,
+            monthlyLimitInr: wire.monthlyLimitInr,
+            alertAt80: parts.alertAt80,
+            alertAt100: parts.alertAt100,
+            alertAt110: parts.alertAt110,
+            enabled: wire.enabled,
+            extraThresholds: parts.extras
+        )
+    }
+
+    /// Delete the budget for a category. No-op if none exists.
+    func deleteBudget(category: Category) async throws {
+        let encodedName = category.rawValue.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed
+        ) ?? category.rawValue
+        var req = URLRequest(url: Constants.baseURL.appendingPathComponent("/budgets/\(encodedName)"))
+        req.httpMethod = "DELETE"
+        req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
+        let (data, http) = try await HTTPClient.shared.send(req)
+        try ensure2xx(http: http, data: data)
+    }
+
     // MARK: - Device + location
 
     /// Tell the backend about this device's APNs token so it can send silent pushes.

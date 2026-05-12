@@ -11,6 +11,7 @@ import { recordEmailMessage } from '../db/emailMessages.js';
 import { prisma } from '../db/client.js';
 import type { CategorizeContext, Enrichment } from '../categorize/types.js';
 import type { ParsedTransaction } from '../parsers/hdfc/index.js';
+import { checkBudgetForCategory } from './budgetAlerts.js';
 
 export type ProcessOutcome =
   | {
@@ -206,6 +207,21 @@ export async function processGmailMessage(
       gmailMessageId: msg.id,
       transactionId: upsert.id,
     };
+  }
+
+  // Budget threshold check — fires an APNs push if MTD spend on this
+  // category just crossed 80/100/110% for the first time this month.
+  // Fire-and-forget: best-effort, never blocks the email pipeline.
+  if (parseResult.data.direction === 'out' && categorization.picked) {
+    const category = await prisma.category.findUnique({
+      where: { name: categorization.picked.category },
+      select: { id: true },
+    });
+    if (category) {
+      void checkBudgetForCategory(category.id).catch((err) =>
+        console.error('[budgetAlerts] check failed:', err),
+      );
+    }
   }
 
   const needsLocation =

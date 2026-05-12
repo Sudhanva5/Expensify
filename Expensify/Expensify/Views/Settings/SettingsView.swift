@@ -4,12 +4,18 @@ import SwiftUI
 /// Cred-style: lowercase section labels, tight typography, restrained color.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var budgets: [Budget] = MockData.budgets
+    @Environment(BudgetStore.self) private var budgetStore
 
     @State private var pingState: PingState = .idle
     @State private var pingResult: APIClient.PingResult?
 
     enum PingState { case idle, running, done }
+
+    /// One row per category. Categories without a backend budget get a
+    /// placeholder "not set" Budget so the user can tap in and create one.
+    private var allBudgetRows: [Budget] {
+        Category.allCases.map { budgetStore.budget(for: $0) }
+    }
 
     var body: some View {
         NavigationStack {
@@ -119,9 +125,9 @@ struct SettingsView: View {
 
     private var budgetsSection: some View {
         Section {
-            ForEach($budgets) { $budget in
+            ForEach(allBudgetRows) { budget in
                 NavigationLink {
-                    BudgetEditView(budget: $budget)
+                    BudgetEditView(initial: budget)
                 } label: {
                     BudgetSummaryRow(budget: budget)
                 }
@@ -186,4 +192,5 @@ private struct BudgetSummaryRow: View {
 
 #Preview {
     SettingsView()
+        .environment(BudgetStore())
 }
