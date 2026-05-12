@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import { CATEGORIES, type CategoryName } from './types.js';
 import type { BraveSearchResult } from './brave.js';
+import type { NearbyPlace } from '../services/places.js';
 
 const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
 
@@ -18,12 +19,19 @@ export interface GroqCategorizeInput {
   isAutopay: boolean;
   // Optional Tier-4 grounding: web search results about the merchant.
   webContext?: BraveSearchResult[];
+  // Optional Places-tier grounding: businesses near the transaction location.
+  // When supplied, Groq picks the most likely candidate AND returns its name
+  // so we can update merchantNormalized.
+  placesContext?: NearbyPlace[];
 }
 
 export interface GroqCategorizeOutput {
   category: CategoryName | null;
   confidence: number;
   rationale: string;
+  /// Resolved business name (from Places candidates) — only present when
+  /// placesContext was supplied and Groq picked a specific candidate.
+  merchantName?: string;
 }
 
 export interface GroqCategorizer {
@@ -46,6 +54,20 @@ ${input.webContext
   .join('\n')}\n`
       : '';
 
+  const placesSection =
+    input.placesContext && input.placesContext.length > 0
+      ? `\nBusinesses within 100m of the transaction location (pick the most likely one — or say it's none of these if the user was paying a friend/driver who happened to be at this spot):
+${input.placesContext
+  .map(
+    (p, i) =>
+      `${i + 1}. ${p.name} — types: ${p.types.slice(0, 4).join(', ')}${
+        p.formattedAddress ? ` — ${p.formattedAddress}` : ''
+      }`,
+  )
+  .join('\n')}
+If one of these places clearly matches what the user just paid for, return its exact "name" string in the "merchantName" field of your JSON response.\n`
+      : '';
+
   return `You are a transaction categorizer for an Indian personal finance app.
 
 Categorize this transaction into exactly ONE of these categories, or null if you cannot reasonably categorize:
@@ -60,7 +82,7 @@ Transaction:
 - Direction: ${input.direction === 'out' ? 'outgoing spend' : 'incoming credit'}
 - Instrument: ${input.instrument}
 - Auto-pay: ${input.isAutopay ? 'yes' : 'no'}
-${webSection}
+${placesSection}${webSection}
 Indian context hints:
 - Personal UPI handles: @oksbi, @okaxis, @okhdfcbank, @okicici. Local-part shaped like a person's name = Personal Transfer.
 - Merchant UPI handles: @ybl with q-prefix usually means a small business.
@@ -71,7 +93,8 @@ Respond with JSON only — no markdown, no preamble:
 {
   "category": "<exact category name from the list, or null>",
   "confidence": <number between 0 and 1>,
-  "rationale": "<one short sentence>"
+  "rationale": "<one short sentence>",
+  "merchantName": "<exact name of the matched nearby business, or omit if none matches>"
 }`;
 }
 
@@ -85,6 +108,7 @@ export const groqResponseSchema = z.object({
   category: z.union([z.enum(CATEGORIES), z.null()]),
   confidence: z.number().min(0).max(1),
   rationale: z.string().max(500),
+  merchantName: z.string().min(1).max(200).optional(),
 });
 
 // Lenient parse: returns a safe "no signal" output on validation failure

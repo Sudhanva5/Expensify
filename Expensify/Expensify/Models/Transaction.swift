@@ -65,13 +65,28 @@ struct Transaction: Identifiable, Hashable {
 }
 
 extension Transaction {
-    /// Display-friendly merchant: prefers normalized over raw when shorter.
+    /// Display-friendly merchant. Prefer the normalized name whenever it's
+    /// distinct from the raw payee string — that's how the Places-resolved
+    /// business name (e.g. "MTR Hotel Jayanagar") wins over the UPI payee
+    /// name (e.g. "RAJESH KUMAR"). Falls back to raw when they're identical
+    /// (which is the case before any resolution happens).
     var displayMerchant: String {
         if !merchantNormalized.isEmpty,
-           merchantNormalized.count < merchantRaw.count {
+           merchantNormalized.caseInsensitiveCompare(merchantRaw) != .orderedSame {
             return merchantNormalized
         }
         return merchantRaw
+    }
+
+    /// True if we have a Places-resolved business name distinct from the raw payee.
+    var hasResolvedMerchant: Bool {
+        !merchantNormalized.isEmpty &&
+        merchantNormalized.caseInsensitiveCompare(merchantRaw) != .orderedSame
+    }
+
+    /// True if lat/lng were actually captured (not just "awaiting" or "missed").
+    var hasCoordinates: Bool {
+        locationLat != nil && locationLng != nil
     }
 
     /// True if this transaction is in the review queue.

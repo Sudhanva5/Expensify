@@ -27,6 +27,17 @@ struct HomeView: View {
             .sorted { $0.occurredAt > $1.occurredAt }
     }
 
+    /// Time-of-day-aware greeting. "Good morning" / afternoon / evening.
+    private var greeting: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        switch hour {
+        case 4..<12: return "Good morning"
+        case 12..<17: return "Good afternoon"
+        case 17..<22: return "Good evening"
+        default: return "Good night"
+        }
+    }
+
     var body: some View {
         NavigationStack {
             list
@@ -49,15 +60,17 @@ struct HomeView: View {
     private var list: some View {
         List {
             Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Hi, welcome to Expensify")
-                        .font(.title2.weight(.semibold))
-                    Text("Track every rupee that leaves your account.")
-                        .font(.subheadline)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(greeting)
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(.primary)
+                    Text("Here's what your money's been up to.")
+                        .font(.system(size: 14))
                         .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 8, trailing: 16))
+                .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 12, trailing: 20))
             }
 
             Section {
@@ -66,7 +79,7 @@ struct HomeView: View {
                     Spacer()
                 }
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 6, trailing: 20))
             }
 
             if availableInstruments.count > 1 {

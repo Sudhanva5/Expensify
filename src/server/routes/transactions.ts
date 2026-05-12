@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../../db/client.js';
 import { requireApiToken } from '../middleware/auth.js';
+import { recategorizeWithLocation } from '../../pipeline/recategorizeWithLocation.js';
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
@@ -171,6 +172,31 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
           locationStatus: 'fulfilled',
         },
       });
+
+      // Fire-and-forget: now that we have lat/lng, run a Places + Groq pass
+      // to resolve the actual merchant name and category. Logs the outcome
+      // but never blocks the iOS upload response.
+      void recategorizeWithLocation({
+        transactionId: id,
+        lat: parsed.data.lat,
+        lng: parsed.data.lng,
+      })
+        .then((outcome) => {
+          if (outcome.updated) {
+            req.log.info(
+              {
+                txId: id,
+                merchant: outcome.newMerchant,
+                category: outcome.newCategory,
+                confidence: outcome.confidence,
+              },
+              'recategorize: updated',
+            );
+          } else {
+            req.log.info({ txId: id, reason: outcome.reason }, 'recategorize: skipped');
+          }
+        })
+        .catch((err) => req.log.error({ err, txId: id }, 'recategorize: failed'));
 
       return { ok: true };
     },

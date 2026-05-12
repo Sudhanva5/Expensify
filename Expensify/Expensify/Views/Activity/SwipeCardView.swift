@@ -99,7 +99,10 @@ struct SwipeCardView: View {
                 if item.transaction.locationStatus != .notApplicable {
                     LocationChip(
                         label: item.transaction.locationLabel,
-                        status: item.transaction.locationStatus
+                        status: item.transaction.locationStatus,
+                        latitude: item.transaction.locationLat,
+                        longitude: item.transaction.locationLng,
+                        merchantLabel: item.transaction.displayMerchant
                     )
                 }
                 Spacer()
