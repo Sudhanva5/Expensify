@@ -102,13 +102,29 @@ actor APIClient {
         try await patchNoContent(path: "/transactions/\(id)", body: body)
     }
 
-    /// IDs of transactions whose location is still awaiting upload from iOS.
-    /// Called when SLC fires or the app foregrounds — backfill those rows
-    /// with the device's best-known location.
-    func fetchAwaitingLocationTransactionIds() async throws -> [String] {
-        struct Row: Decodable { let id: String }
+    /// Transactions whose location is still awaiting upload from iOS, with
+    /// their original `occurredAt`. The backfill flow uses occurredAt to
+    /// pick the location-history entry closest in time to when each
+    /// transaction actually happened.
+    func fetchAwaitingLocationTransactions() async throws -> [AwaitingTransaction] {
+        struct Row: Decodable {
+            let id: String
+            let occurredAt: String  // ISO 8601 from backend
+        }
         let rows: [Row] = try await getJSON(path: "/transactions/awaiting")
-        return rows.map(\.id)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fallback = ISO8601DateFormatter()
+        return rows.compactMap { row in
+            let date = formatter.date(from: row.occurredAt) ?? fallback.date(from: row.occurredAt)
+            guard let date else { return nil }
+            return AwaitingTransaction(id: row.id, occurredAt: date)
+        }
+    }
+
+    struct AwaitingTransaction: Hashable, Sendable {
+        let id: String
+        let occurredAt: Date
     }
 
     /// Tell the backend about this device's APNs token so it can send silent pushes.

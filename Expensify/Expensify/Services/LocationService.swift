@@ -23,23 +23,61 @@ final class LocationService: NSObject, @unchecked Sendable {
     private var continuation: CheckedContinuation<CLLocation, Error>?
     private let lock = NSLock()
 
-    /// Most recent SLC reading, persisted across launches so the silent-push
-    /// handler can fall back to it if `requestLocation()` is too slow.
-    var cachedLocation: CLLocation? {
-        guard let data = UserDefaults.standard.data(forKey: Self.cacheKey),
-              let cached = try? JSONDecoder().decode(CachedLocation.self, from: data) else {
-            return nil
+    /// Rolling movement log built from SLC updates. Zero extra battery cost —
+    /// we only persist what iOS already hands us. Used to match awaiting
+    /// transactions to the location closest in time to when they happened.
+    var locationHistory: [LocationTrace] {
+        guard let data = UserDefaults.standard.data(forKey: Self.historyKey),
+              let history = try? JSONDecoder().decode([LocationTrace].self, from: data) else {
+            return []
         }
+        return history
+    }
+
+    /// Most recent SLC reading, derived from the history.
+    var cachedLocation: CLLocation? {
+        locationHistory.last.map { trace in
+            CLLocation(
+                coordinate: CLLocationCoordinate2D(latitude: trace.lat, longitude: trace.lng),
+                altitude: 0,
+                horizontalAccuracy: 500,
+                verticalAccuracy: -1,
+                timestamp: trace.timestamp
+            )
+        }
+    }
+
+    /// Return the historical location closest in time to the given target.
+    /// Returns nil if the history is empty. There's no "too far in time"
+    /// threshold — even an old match is usually more useful than the
+    /// current location for a transaction that happened hours ago.
+    func bestLocationForTimestamp(_ target: Date) -> CLLocation? {
+        let history = locationHistory
+        guard !history.isEmpty else { return nil }
+
+        var best: LocationTrace?
+        var smallestDelta: TimeInterval = .infinity
+        for trace in history {
+            let delta = abs(trace.timestamp.timeIntervalSince(target))
+            if delta < smallestDelta {
+                smallestDelta = delta
+                best = trace
+            }
+        }
+
+        guard let match = best else { return nil }
         return CLLocation(
-            coordinate: CLLocationCoordinate2D(latitude: cached.lat, longitude: cached.lng),
+            coordinate: CLLocationCoordinate2D(latitude: match.lat, longitude: match.lng),
             altitude: 0,
             horizontalAccuracy: 500,
             verticalAccuracy: -1,
-            timestamp: cached.timestamp
+            timestamp: match.timestamp
         )
     }
 
-    private static let cacheKey = "expensify.lastKnownLocation"
+    private static let historyKey = "expensify.locationHistory"
+    private static let maxHistorySize = 200
+    private static let maxHistoryAge: TimeInterval = 14 * 24 * 60 * 60  // 14 days
 
     override init() {
         super.init()
@@ -121,14 +159,25 @@ final class LocationService: NSObject, @unchecked Sendable {
 
     // MARK: - Private
 
-    private func cache(_ location: CLLocation) {
-        let c = CachedLocation(
+    private func appendToHistory(_ location: CLLocation) {
+        var history = locationHistory
+        history.append(LocationTrace(
             lat: location.coordinate.latitude,
             lng: location.coordinate.longitude,
             timestamp: location.timestamp
-        )
-        if let data = try? JSONEncoder().encode(c) {
-            UserDefaults.standard.set(data, forKey: Self.cacheKey)
+        ))
+
+        // Drop entries older than the retention window
+        let cutoff = Date().addingTimeInterval(-Self.maxHistoryAge)
+        history = history.filter { $0.timestamp >= cutoff }
+
+        // Cap size — keep the most recent N
+        if history.count > Self.maxHistorySize {
+            history = Array(history.suffix(Self.maxHistorySize))
+        }
+
+        if let data = try? JSONEncoder().encode(history) {
+            UserDefaults.standard.set(data, forKey: Self.historyKey)
         }
     }
 
@@ -148,8 +197,9 @@ extension LocationService: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let loc = locations.last else { return }
 
-        // Always refresh the cache so subsequent best-available reads are fresh.
-        cache(loc)
+        // Always append to the rolling movement log. This is the foundation
+        // for "match awaiting transactions to where you were at that time."
+        appendToHistory(loc)
 
         lock.lock()
         let waitingOneShot = continuation != nil
@@ -194,7 +244,8 @@ extension LocationService: CLLocationManagerDelegate {
     }
 }
 
-private struct CachedLocation: Codable {
+/// One entry in the rolling location history. Stored as JSON in UserDefaults.
+struct LocationTrace: Codable {
     let lat: Double
     let lng: Double
     let timestamp: Date
