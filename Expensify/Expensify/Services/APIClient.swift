@@ -87,6 +87,21 @@ actor APIClient {
         return dtos.compactMap { $0.toModel() }
     }
 
+    /// Mark a transaction as resolved. Optionally override the category at
+    /// the same time (used by the post-swipe tagging list). Called from the
+    /// Activity tab on swipe-right and on "Update Changes".
+    func confirmTransaction(id: String, overrideCategory: Category? = nil) async throws {
+        struct Body: Encodable {
+            let category: String?
+            let status: String
+        }
+        // category is Optional<String>; Swift's JSONEncoder OMITS nil fields
+        // by default, so omitting the override produces `{"status":"resolved"}`
+        // which leaves the existing category alone.
+        let body = Body(category: overrideCategory?.rawValue, status: "resolved")
+        try await patchNoContent(path: "/transactions/\(id)", body: body)
+    }
+
     /// IDs of transactions whose location is still awaiting upload from iOS.
     /// Called when SLC fires or the app foregrounds — backfill those rows
     /// with the device's best-known location.
@@ -140,9 +155,17 @@ actor APIClient {
         return try decoder.decode(T.self, from: data)
     }
 
+    private func patchNoContent<B: Encodable>(path: String, body: B) async throws {
+        try await sendNoContent(method: "PATCH", path: path, body: body)
+    }
+
     private func postNoContent<B: Encodable>(path: String, body: B) async throws {
+        try await sendNoContent(method: "POST", path: path, body: body)
+    }
+
+    private func sendNoContent<B: Encodable>(method: String, path: String, body: B) async throws {
         var req = URLRequest(url: Constants.baseURL.appendingPathComponent(path))
-        req.httpMethod = "POST"
+        req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
         // Keep snake_case keys to match the backend's expected payload shape

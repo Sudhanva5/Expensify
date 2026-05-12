@@ -107,26 +107,72 @@ struct ActivityView: View {
     private func handleSwipe(item: ReviewItem, direction: SwipeCardView.SwipeDirection) {
         queue.removeAll { $0.id == item.id }
 
-        if direction == .left {
+        if direction == .right {
+            // "Looks ok" — confirm the system's suggested category. If there's
+            // no suggestion (kirana with no signal), we can't auto-confirm —
+            // route it to the tagging list instead so the user picks.
+            guard item.transaction.category != nil else {
+                pendingTags.append(PendingTag(item: item))
+                maybePresentTaggingList()
+                return
+            }
+            // Fire-and-forget: optimistic UI, store refresh on completion.
+            Task {
+                do {
+                    try await APIClient.shared.confirmTransaction(id: item.id)
+                    await store.refresh()
+                } catch {
+                    #if DEBUG
+                    print("[Activity] confirm failed for \(item.id): \(error)")
+                    #endif
+                    // On failure the row stays pending_review; next refresh
+                    // brings it back into the queue. User can re-swipe.
+                    await store.refresh()
+                }
+            }
+        } else {
+            // "Needs tag" — collect for the bulk-tagging list.
             pendingTags.append(PendingTag(item: item))
         }
 
-        if queue.isEmpty && !pendingTags.isEmpty {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                showTaggingList = true
-            }
+        maybePresentTaggingList()
+    }
+
+    private func maybePresentTaggingList() {
+        guard queue.isEmpty && !pendingTags.isEmpty else { return }
+        // Brief delay so the last card's swipe animation gets to play.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            showTaggingList = true
         }
     }
 
     private func applyTaggingChanges() {
-        // V1: just clear local state. Wiring this to the backend is the next
-        // step (POST /transactions/:id/category) — for now you can confirm
-        // visually that the tagging list flow works.
+        let toSubmit = pendingTags
         pendingTags.removeAll()
         showTaggingList = false
+
+        Task {
+            for tag in toSubmit {
+                do {
+                    try await APIClient.shared.confirmTransaction(
+                        id: tag.id,
+                        overrideCategory: tag.chosenCategory
+                    )
+                } catch {
+                    #if DEBUG
+                    print("[Activity] tag update failed for \(tag.id): \(error)")
+                    #endif
+                }
+            }
+            await store.refresh()
+        }
     }
 
     private func cancelTagging() {
+        // Cancel: dump pending tags WITHOUT writing. The transactions stay
+        // pending_review on the backend; next refresh restores them in the
+        // review queue and the user can take another pass.
+        pendingTags.removeAll()
         showTaggingList = false
     }
 }

@@ -16,6 +16,13 @@ const locationBody = z.object({
   city: z.string().max(120).optional(),
 });
 
+const patchBody = z.object({
+  // Category name as a string (e.g. "Food"). Omit to leave unchanged.
+  // The endpoint never accepts `null` — clearing a category isn't supported in V1.
+  category: z.string().optional(),
+  status: z.enum(['pending_review', 'resolved']).optional(),
+});
+
 interface IdParams {
   Params: { id: string };
   Body: unknown;
@@ -83,6 +90,49 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
         location_lng: r.locationLng !== null ? Number(r.locationLng) : null,
         location_status: r.locationStatus,
       }));
+    },
+  );
+
+  // Update a single transaction. iOS uses this after a swipe-right
+  // ("looks ok" → just mark resolved) or after the post-swipe tagging
+  // list ("Update Changes" → override category + mark resolved).
+  app.patch<IdParams>(
+    '/:id',
+    { preHandler: requireApiToken },
+    async (req, reply) => {
+      const { id } = req.params;
+      const parsed = patchBody.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'Invalid body', details: parsed.error.format() });
+      }
+
+      const updates: { status?: 'pending_review' | 'resolved'; categoryId?: string } = {};
+
+      if (parsed.data.status !== undefined) {
+        updates.status = parsed.data.status;
+      }
+
+      if (parsed.data.category !== undefined) {
+        const cat = await prisma.category.findUnique({
+          where: { name: parsed.data.category },
+        });
+        if (!cat) {
+          return reply.code(400).send({ error: `Unknown category: ${parsed.data.category}` });
+        }
+        updates.categoryId = cat.id;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return reply.code(400).send({ error: 'No fields to update' });
+      }
+
+      try {
+        await prisma.transaction.update({ where: { id }, data: updates });
+      } catch {
+        return reply.code(404).send({ error: 'Transaction not found' });
+      }
+
+      return { ok: true };
     },
   );
 
