@@ -5,10 +5,25 @@ struct HomeView: View {
     @Binding var showSettings: Bool
     @Environment(TransactionStore.self) private var store
     @State private var range: DateRange = .defaultRange
+    @State private var instrumentFilter: String? = nil  // nil = "All"
+
+    private var dateScoped: [Transaction] {
+        store.transactions.filter { range.contains($0.occurredAt) }
+    }
+
+    private var availableInstruments: [(instrument: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for tx in dateScoped {
+            counts[tx.instrument, default: 0] += 1
+        }
+        return counts
+            .map { ($0.key, $0.value) }
+            .sorted { $0.count > $1.count }
+    }
 
     private var filtered: [Transaction] {
-        store.transactions
-            .filter { range.contains($0.occurredAt) }
+        dateScoped
+            .filter { instrumentFilter == nil || $0.instrument == instrumentFilter }
             .sorted { $0.occurredAt > $1.occurredAt }
     }
 
@@ -34,6 +49,37 @@ struct HomeView: View {
                     }
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                }
+
+                // Instrument filter pills — only show if there's more than
+                // one instrument in the current date scope. With just one,
+                // the filter is noise.
+                if availableInstruments.count > 1 {
+                    Section {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                InstrumentPill(
+                                    label: "All",
+                                    count: dateScoped.count,
+                                    isSelected: instrumentFilter == nil
+                                ) {
+                                    instrumentFilter = nil
+                                }
+                                ForEach(availableInstruments, id: \.instrument) { entry in
+                                    InstrumentPill(
+                                        label: InstrumentLabel.display(for: entry.instrument),
+                                        count: entry.count,
+                                        isSelected: instrumentFilter == entry.instrument
+                                    ) {
+                                        instrumentFilter = entry.instrument
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                        }
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                    }
                 }
 
                 if let err = store.loadError {

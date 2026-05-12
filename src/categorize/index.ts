@@ -28,9 +28,33 @@ export async function categorize(
   ctx: CategorizeContext,
   enrichment: Enrichment = {},
 ): Promise<CategorizationResult> {
-  const signals: CategorizationSignal[] = [];
-
   const merchantNormalized = stripRoutingPrefix(tx.merchantRaw, ctx.routingPrefixes);
+
+  // UPI credits (incoming money) are essentially always P2P transfers from
+  // another person. Auto-resolve without running the full pipeline — there's
+  // nothing actionable for the user to review on an inflow. If a real
+  // salary/refund flow becomes a need, the user can re-tag from a detail
+  // view (planned, not built yet).
+  if (tx.template === 'upi_credit') {
+    return {
+      signals: [{
+        source: 'vpa_shape',
+        category: 'Personal Transfer (Peer-to-Peer)',
+        confidence: 0.99,
+        details: 'Inflow auto-categorized as P2P',
+      }],
+      picked: {
+        source: 'vpa_shape',
+        category: 'Personal Transfer (Peer-to-Peer)',
+        confidence: 0.99,
+        details: 'Inflow auto-categorized as P2P',
+      },
+      status: 'auto_resolved',
+      merchantNormalized,
+    };
+  }
+
+  const signals: CategorizationSignal[] = [];
   const vpaShape: VpaShape = tx.vpa ? classifyVpa(tx.vpa) : 'unknown';
 
   // Tier 0 — autopay shortcut
