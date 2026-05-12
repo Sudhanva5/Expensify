@@ -4,6 +4,11 @@ import SwiftUI
 /// amount, then a single line of meta. Swipe right = "looks ok" (mark
 /// resolved at the suggested category), swipe left = "needs tag" (queues
 /// for the bulk tagging sheet).
+///
+/// Slack-style overlay: while the user is mid-swipe, a colored panel
+/// reveals from the direction of the swipe with a big icon + label
+/// telling them exactly what's about to happen. Greens up to the
+/// threshold; flies off after.
 struct SwipeCardView: View {
     enum SwipeDirection { case left, right }
 
@@ -13,28 +18,72 @@ struct SwipeCardView: View {
     @State private var offset: CGSize = .zero
     private let swipeThreshold: CGFloat = 100
 
+    /// 0…1 how close we are to the threshold.
+    private var dragProgress: CGFloat {
+        min(1, abs(offset.width) / swipeThreshold)
+    }
+
     var body: some View {
-        cardContent
-            .offset(offset)
-            .rotationEffect(.degrees(Double(offset.width / 24)))
-            .gesture(
-                DragGesture()
-                    .onChanged { value in offset = value.translation }
-                    .onEnded { value in
-                        let h = value.translation.width
-                        if h < -swipeThreshold {
-                            commitSwipe(.left)
-                        } else if h > swipeThreshold {
-                            commitSwipe(.right)
-                        } else {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
-                                offset = .zero
+        ZStack {
+            // Action overlays sit BEHIND the card and are revealed as the
+            // card moves out from under them. Slack-style.
+            actionOverlay(.left)   // left swipe = "needs tag"
+            actionOverlay(.right)  // right swipe = "looks ok"
+
+            cardContent
+                .offset(offset)
+                .rotationEffect(.degrees(Double(offset.width / 32)))
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in offset = value.translation }
+                        .onEnded { value in
+                            let h = value.translation.width
+                            if h < -swipeThreshold {
+                                commitSwipe(.left)
+                            } else if h > swipeThreshold {
+                                commitSwipe(.right)
+                            } else {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                                    offset = .zero
+                                }
                             }
                         }
-                    }
-            )
-            .overlay(alignment: .topLeading) { hintLabel("needs tag", direction: -1) }
-            .overlay(alignment: .topTrailing) { hintLabel("looks ok", direction: 1) }
+                )
+        }
+    }
+
+    // MARK: - Slack-style action overlays
+
+    @ViewBuilder
+    private func actionOverlay(_ side: SwipeDirection) -> some View {
+        let isActive: Bool = (side == .left && offset.width < 0)
+            || (side == .right && offset.width > 0)
+        let progress = isActive ? dragProgress : 0
+        let isLeft = side == .left
+
+        ZStack {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(isLeft ? AppColor.tap : AppColor.inflow)
+
+            VStack(spacing: 14) {
+                Circle()
+                    .fill(.white.opacity(0.18))
+                    .frame(width: 64, height: 64)
+                    .overlay(
+                        Image(systemName: isLeft ? "tag.fill" : "checkmark")
+                            .font(.system(size: 28, weight: .semibold))
+                            .foregroundStyle(.white)
+                    )
+                Text(isLeft ? "needs tag" : "looks ok")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: isLeft ? .leading : .trailing)
+            .padding(.horizontal, 40)
+        }
+        .frame(height: 360)
+        .opacity(progress)
+        .scaleEffect(0.94 + progress * 0.06)  // tiny scale-up as user commits
     }
 
     // MARK: - Card
@@ -59,14 +108,7 @@ struct SwipeCardView: View {
                 Spacer(minLength: 0)
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: 0) {
-                Text(amountIntegerString)
-                    .font(.system(size: 44, weight: .bold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(AppColor.textPrimary)
-                Text(amountDecimalString)
-                    .font(.system(size: 22, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(AppColor.textTertiary)
-            }
+            AmountText(amount: item.transaction.amountInr, direction: item.transaction.direction, size: 40)
 
             Divider().background(AppColor.hairline)
 
@@ -132,27 +174,10 @@ struct SwipeCardView: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(AppColor.hairline.opacity(0.7), lineWidth: 0.5)
         )
-        .shadow(color: .black.opacity(0.05), radius: 16, x: 0, y: 8)
+        .shadow(color: .black.opacity(0.07), radius: 18, x: 0, y: 10)
     }
 
-    // MARK: - Swipe affordances
-
-    private func hintLabel(_ text: String, direction: Double) -> some View {
-        let progress = min(1, abs(offset.width) / swipeThreshold)
-        let isMatching = (direction < 0 && offset.width < 0) || (direction > 0 && offset.width > 0)
-        let opacity = isMatching ? Double(progress) : 0
-        let bg: Color = direction < 0 ? AppColor.textSecondary : AppColor.inflow
-
-        return Text(text)
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(bg)
-            .clipShape(Capsule())
-            .padding(22)
-            .opacity(opacity)
-    }
+    // MARK: - Commit
 
     private func commitSwipe(_ dir: SwipeDirection) {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
@@ -165,22 +190,6 @@ struct SwipeCardView: View {
     }
 
     // MARK: - Strings
-
-    private var doubleAmount: Double {
-        NSDecimalNumber(decimal: item.transaction.amountInr).doubleValue
-    }
-
-    private var amountIntegerString: String {
-        let intValue = Int(doubleAmount)
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        return "₹\(f.string(from: NSNumber(value: intValue)) ?? "\(intValue)")"
-    }
-
-    private var amountDecimalString: String {
-        let cents = Int((doubleAmount.truncatingRemainder(dividingBy: 1) * 100).rounded())
-        return cents == 0 ? "" : String(format: ".%02d", cents)
-    }
 
     private var timeString: String {
         let df = DateFormatter()

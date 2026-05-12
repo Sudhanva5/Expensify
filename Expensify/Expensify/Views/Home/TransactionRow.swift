@@ -1,18 +1,19 @@
 import SwiftUI
 
-/// Transaction row. Cred-inspired, restrained color use.
+/// Transaction row. Cred-inspired, restrained.
 ///
-///   ○ Avatar     Merchant Name                              ₹547.00
-///                [🍴 food]  [📍 Bengaluru]                  9 may '26
+///   ○  Merchant Name                                  ₹547.00
+///       food · 📍 bengaluru                           9 may '26
 ///
 /// Layout:
 ///   • Avatar (favicon or initials) on the left
 ///   • Top: merchant name (left) + amount (right)
-///   • Bottom-left: category tag + location tag (both compact)
-///   • Bottom-right: date in small tertiary text
+///   • Bottom-left: inline "category · location" — category greyed,
+///     location in tap-blue (tap to open Maps). No tags, no pills.
+///   • Bottom-right: small tertiary date
 ///
-/// Color is reserved for signal: green for inflows, blue for tappable
-/// map affordances. Everything else stays in the warm-neutral palette.
+/// Color is reserved for signal: green for inflows (handled by
+/// `AmountText`), blue for the tappable location text.
 struct TransactionRow: View {
     let transaction: Transaction
 
@@ -20,28 +21,14 @@ struct TransactionRow: View {
         HStack(alignment: .center, spacing: 14) {
             MerchantAvatar(merchantName: transaction.displayMerchant, size: 44)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(transaction.displayMerchant)
                     .font(AppFont.rowTitle)
                     .foregroundStyle(AppColor.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
-                HStack(spacing: 6) {
-                    if let category = transaction.category {
-                        CategoryPill(category: category, compact: true)
-                    }
-                    if transaction.hasCoordinates,
-                       let lat = transaction.locationLat,
-                       let lng = transaction.locationLng {
-                        LocationMapChip(
-                            label: transaction.locationCity ?? transaction.locationLabel ?? "map",
-                            latitude: lat,
-                            longitude: lng,
-                            merchantLabel: transaction.displayMerchant
-                        )
-                    }
-                }
+                metaLine
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -56,39 +43,66 @@ struct TransactionRow: View {
         .contentShape(Rectangle())
     }
 
-    /// Compact date — "9 May '26" — matches the reference's "11 May '26".
+    /// Inline "category · location" — both as plain text, only the
+    /// location carries a hint of blue + a tap target.
+    @ViewBuilder
+    private var metaLine: some View {
+        HStack(spacing: 4) {
+            Text(categoryText)
+                .font(.system(size: 13))
+                .foregroundStyle(AppColor.textSecondary)
+
+            if let city = locationText {
+                Text("·")
+                    .font(.system(size: 13))
+                    .foregroundStyle(AppColor.textTertiary)
+
+                if transaction.hasCoordinates,
+                   let lat = transaction.locationLat,
+                   let lng = transaction.locationLng {
+                    Button {
+                        MapsLinker.open(latitude: lat, longitude: lng, label: transaction.displayMerchant)
+                    } label: {
+                        HStack(spacing: 2) {
+                            Image(systemName: "mappin.and.ellipse")
+                                .font(.system(size: 10, weight: .medium))
+                            Text(city.lowercased())
+                                .font(.system(size: 13))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(AppColor.tap)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(city.lowercased())
+                        .font(.system(size: 13))
+                        .foregroundStyle(AppColor.textSecondary)
+                }
+            }
+        }
+    }
+
+    private var categoryText: String {
+        transaction.category?.shortName.lowercased() ?? "uncategorized"
+    }
+
+    private var locationText: String? {
+        // Prefer city; fall back to coords; nothing if the transaction
+        // has no location concept (autopay / inflow).
+        if let city = transaction.locationCity, !city.isEmpty {
+            return city
+        }
+        if let label = transaction.locationLabel {
+            return label
+        }
+        return nil
+    }
+
+    /// Compact date — "9 May '26".
     private var dateString: String {
         let df = DateFormatter()
         df.dateFormat = "d MMM ''yy"
         return df.string(from: transaction.occurredAt).lowercased()
-    }
-}
-
-/// Small clickable map chip. Subtle blue (the only tap-affordance accent).
-private struct LocationMapChip: View {
-    let label: String
-    let latitude: Double
-    let longitude: Double
-    let merchantLabel: String
-
-    var body: some View {
-        Button {
-            MapsLinker.open(latitude: latitude, longitude: longitude, label: merchantLabel)
-        } label: {
-            HStack(spacing: 3) {
-                Image(systemName: "mappin.and.ellipse")
-                    .font(.system(size: 9, weight: .semibold))
-                Text(label.lowercased())
-                    .font(.system(size: 11, weight: .medium))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(AppColor.tap)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(AppColor.tap.opacity(0.10))
-            .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
     }
 }
 

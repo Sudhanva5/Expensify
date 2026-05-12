@@ -121,7 +121,7 @@ struct CategoriesView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    AvatarButton(initials: "SA") { showSettings = true }
+                    AvatarButton(initials: CurrentUser.initials) { showSettings = true }
                 }
             }
         }

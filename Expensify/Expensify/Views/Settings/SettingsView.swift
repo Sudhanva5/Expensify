@@ -41,7 +41,7 @@ struct SettingsView: View {
     private var profileSection: some View {
         Section {
             HStack(spacing: 12) {
-                Text("SA")
+                Text(CurrentUser.initials)
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(AppColor.textPrimary)
                     .frame(width: 48, height: 48)
@@ -49,10 +49,10 @@ struct SettingsView: View {
                     .clipShape(Circle())
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Sudhanva")
+                    Text(CurrentUser.name)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(AppColor.textPrimary)
-                    Text("sm.acharya@scaler.com")
+                    Text(CurrentUser.email)
                         .font(AppFont.caption)
                         .foregroundStyle(AppColor.textTertiary)
                 }

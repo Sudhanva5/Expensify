@@ -1,58 +1,81 @@
 import SwiftUI
 
-/// Renders a rupee amount with the integer part in primary weight and the
-/// decimal portion in a smaller, slightly muted size — so "₹1,234.56"
-/// reads as a single number rather than two equally-weighted halves.
+/// Rupee amount composed of three text pieces:
+///   • Sign (optional "+" for inflows)
+///   • Rupee symbol — rendered WITHOUT monospaced-digit (the glyph isn't a
+///     digit; forcing monospacing on it makes ₹ look thin and oddly spaced)
+///   • Integer portion — monospaced digits so columns of amounts align
+///   • Decimal portion — smaller and muted
 ///
-/// Direction = .in renders in green with a "+" prefix; .out renders in
-/// primary text color, unprefixed. (No red — red would feel scolding.)
+/// Inflows are green and prefixed `+`. Outflows stay in primary text color
+/// (no red — red feels scolding for normal spending).
 struct AmountText: View {
     let amount: Decimal
     let direction: Transaction.Direction
+    var size: CGFloat = 16
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 0) {
+        HStack(alignment: .firstTextBaseline, spacing: 1) {
             if direction == .in {
                 Text("+")
-                    .font(AppFont.rowAmount)
-                    .foregroundStyle(AppColor.inflow)
+                    .font(symbolFont)
+                    .foregroundStyle(color)
             }
-            Text(integerPart)
-                .font(AppFont.rowAmount)
-                .foregroundStyle(direction == .in ? AppColor.inflow : AppColor.textPrimary)
-            Text(decimalPart)
-                .font(AppFont.amountDecimal)
-                .foregroundStyle(
-                    direction == .in
-                        ? AppColor.inflow.opacity(0.65)
-                        : AppColor.textTertiary
-                )
+            Text("₹")
+                .font(symbolFont)
+                .foregroundStyle(color)
+            Text(integerString)
+                .font(digitFont)
+                .foregroundStyle(color)
+            Text(decimalString)
+                .font(decimalFont)
+                .foregroundStyle(decimalColor)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityValue)
     }
 
-    private var formatter: NumberFormatter {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.groupingSeparator = ","
-        f.maximumFractionDigits = 0
-        return f
+    // MARK: - Fonts
+
+    private var symbolFont: Font {
+        .system(size: size, weight: .semibold, design: .rounded)
     }
+
+    private var digitFont: Font {
+        .system(size: size, weight: .semibold, design: .rounded)
+            .monospacedDigit()
+    }
+
+    private var decimalFont: Font {
+        .system(size: size * 0.82, weight: .semibold, design: .rounded)
+            .monospacedDigit()
+    }
+
+    // MARK: - Colors
+
+    private var color: Color {
+        direction == .in ? AppColor.inflow : AppColor.textPrimary
+    }
+
+    private var decimalColor: Color {
+        direction == .in ? AppColor.inflow.opacity(0.7) : AppColor.textTertiary
+    }
+
+    // MARK: - Strings
 
     private var doubleValue: Double {
         NSDecimalNumber(decimal: amount).doubleValue
     }
 
-    /// Integer portion with the rupee symbol prefixed: "₹1,234"
-    private var integerPart: String {
+    private var integerString: String {
         let intValue = Int(doubleValue)
-        let formatted = formatter.string(from: NSNumber(value: intValue)) ?? "\(intValue)"
-        return "₹\(formatted)"
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.groupingSeparator = ","
+        return f.string(from: NSNumber(value: intValue)) ?? "\(intValue)"
     }
 
-    /// Decimal portion: ".56" or empty when amount is whole.
-    private var decimalPart: String {
+    private var decimalString: String {
         let cents = Int((doubleValue.truncatingRemainder(dividingBy: 1) * 100).rounded())
         if cents == 0 { return "" }
         return String(format: ".%02d", cents)
@@ -60,7 +83,7 @@ struct AmountText: View {
 
     private var accessibilityValue: String {
         let sign = direction == .in ? "Received" : "Spent"
-        return "\(sign) \(integerPart)\(decimalPart) rupees"
+        return "\(sign) ₹\(integerString)\(decimalString) rupees"
     }
 }
 
@@ -72,6 +95,7 @@ struct AmountText: View {
         AmountText(amount: 211.50, direction: .out)
         AmountText(amount: 23.60, direction: .out)
         AmountText(amount: 12345.67, direction: .out)
+        AmountText(amount: 999, direction: .out, size: 32)
     }
     .padding()
 }

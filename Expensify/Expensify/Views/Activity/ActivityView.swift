@@ -33,7 +33,7 @@ struct ActivityView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    AvatarButton(initials: "SA") { showSettings = true }
+                    AvatarButton(initials: CurrentUser.initials) { showSettings = true }
                 }
             }
             .task {
@@ -82,18 +82,43 @@ struct ActivityView: View {
             }
             .padding(.horizontal, 20)
 
-            HStack {
-                Label("needs tag", systemImage: "arrow.left")
-                    .font(AppFont.caption)
-                    .foregroundStyle(AppColor.textSecondary)
-                Spacer()
-                Label("looks ok", systemImage: "arrow.right")
-                    .font(AppFont.caption)
-                    .foregroundStyle(AppColor.inflow)
-            }
-            .padding(.horizontal, 28)
-
             Spacer()
+
+            // Slack-style two-button action bar at the bottom. Mirrors the
+            // swipe gestures and lets the user act without swiping.
+            if let topCard = visibleCards.first {
+                HStack(spacing: 12) {
+                    Button {
+                        handleSwipe(item: topCard, direction: .left)
+                    } label: {
+                        Label("needs tag", systemImage: "tag")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                    }
+                    .background(AppColor.surface)
+                    .foregroundStyle(AppColor.textPrimary)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(AppColor.hairline, lineWidth: 0.5)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                    Button {
+                        handleSwipe(item: topCard, direction: .right)
+                    } label: {
+                        Label("looks ok", systemImage: "checkmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                    }
+                    .background(AppColor.inflow)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
+            }
         }
     }
 
