@@ -76,6 +76,26 @@ describe('HDFC parser — Template B: Credit Card Debit', () => {
 });
 
 describe('HDFC parser — Template C: CC Autopay (E-mandate)', () => {
+  it('parses Anthropic autopay using "Rs." instead of "₹" for the INR conversion', () => {
+    const result = parseHdfcEmail({
+      subject: 'Auto-debit Confirmation',
+      body: loadFixture('cc-autopay-anthropic-rs.txt'),
+      receivedAt: new Date('2026-05-11T10:00:00Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.template).toBe('cc_autopay');
+    expect(result.data.instrument).toBe('card_3803');
+    expect(result.data.amountMinor).toBe(2360n); // USD 23.60
+    expect(result.data.currency).toBe('USD');
+    expect(result.data.amountInrMinor).toBe(223171n); // ₹2231.71
+    expect(result.data.merchantRaw).toBe('Anthropic');
+    expect(result.data.isAutopay).toBe(true);
+    expect(result.data.bankConvertedRate).toBeCloseTo(94.56, 1);
+  });
+
   it('parses Railway autopay with USD amount and bank-converted INR', () => {
     const result = parseHdfcEmail({
       subject: 'Auto-debit Confirmation',

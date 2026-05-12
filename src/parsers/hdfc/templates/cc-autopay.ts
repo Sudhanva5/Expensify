@@ -27,7 +27,8 @@ export const tryParse: TemplateParser = (input: HdfcEmailInput): ParseResult | n
   const amountM = /Amount:\s*([A-Z]{3})\s+([\d,]+(?:\.\d{1,2})?)/i.exec(input.body);
   if (!amountM) return fail('amount missing');
 
-  const inrM = /\(₹\s*([\d,]+(?:\.\d{1,2})?)\)/.exec(input.body);
+  // HDFC sometimes uses ₹, sometimes "Rs.", sometimes "Rs". Accept all three.
+  const inrM = /\(\s*(?:₹|Rs\.?)\s*([\d,]+(?:\.\d{1,2})?)\s*\)/.exec(input.body);
 
   const dateM = /Date:\s*(\d{2}\/\d{2}\/\d{4})/.exec(input.body);
   if (!dateM) return fail('date missing');
