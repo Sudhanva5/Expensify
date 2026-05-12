@@ -14,11 +14,6 @@ import type {
   GroqCategorizeInput,
   GroqCategorizeOutput,
 } from '../../src/categorize/groq.js';
-import type {
-  BraveSearchClient,
-  BraveSearchInput,
-  BraveSearchResult,
-} from '../../src/categorize/brave.js';
 import { makeTx, istDate } from '../_helpers/makeTx.js';
 
 const baseCtx: CategorizeContext = {
@@ -29,11 +24,8 @@ const baseCtx: CategorizeContext = {
 };
 
 // Mock Groq that returns a canned response and tracks calls.
-// Optionally returns different responses depending on whether webContext was supplied,
-// which is how we distinguish Tier-3 calls from Tier-4 calls in tests.
 function mockGroq(
   out: GroqCategorizeOutput,
-  outWithWeb?: GroqCategorizeOutput,
 ): GroqCategorizer & {
   calls: { count: number; lastInput: GroqCategorizeInput | null };
 } {
@@ -43,24 +35,7 @@ function mockGroq(
     async categorize(input: GroqCategorizeInput) {
       state.count++;
       state.lastInput = input;
-      if (outWithWeb && input.webContext && input.webContext.length > 0) {
-        return outWithWeb;
-      }
       return out;
-    },
-  };
-}
-
-function mockBrave(
-  results: BraveSearchResult[],
-): BraveSearchClient & { calls: { count: number; lastInput: BraveSearchInput | null } } {
-  const state = { count: 0, lastInput: null as BraveSearchInput | null };
-  return {
-    calls: state,
-    async search(input: BraveSearchInput) {
-      state.count++;
-      state.lastInput = input;
-      return results;
     },
   };
 }
@@ -337,109 +312,3 @@ describe('categorize — Tier 3 (Groq)', () => {
   });
 });
 
-describe('categorize — Tier 4 (Brave + Groq)', () => {
-  it('escalates to Brave+Groq when Tier 3 returns low confidence', async () => {
-    const groq = mockGroq(
-      // Tier 3 (no web): low confidence
-      { category: null, confidence: 0, rationale: 'unfamiliar merchant' },
-      // Tier 4 (with web): higher confidence after seeing snippets
-      {
-        category: 'Groceries / Kirana Stores',
-        confidence: 0.88,
-        rationale: 'web results describe a kirana store',
-      },
-    );
-    const brave = mockBrave([
-      {
-        title: 'Sri Guru Raghavendra Enterprises',
-        snippet: 'Local kirana store in Jayanagar, Bangalore',
-        url: 'https://x',
-      },
-    ]);
-
-    const result = await categorize(
-      makeTx({
-        merchantRaw: 'SRI GURU RAGHAVENDRA ENTERPRISES',
-        vpa: 'q201985284@ybl',
-        amountMinor: 9400n,
-      }),
-      { ...baseCtx, groq, brave },
-      { city: 'Bangalore' },
-    );
-
-    expect(groq.calls.count).toBe(2); // tier 3 + tier 4
-    expect(brave.calls.count).toBe(1);
-    expect(brave.calls.lastInput?.city).toBe('Bangalore');
-    expect(brave.calls.lastInput?.merchant).toBe('SRI GURU RAGHAVENDRA ENTERPRISES');
-
-    expect(result.picked?.source).toBe('brave_groq');
-    expect(result.picked?.category).toBe('Groceries / Kirana Stores');
-    expect(result.status).toBe('needs_review'); // 0.88 < 0.95 threshold
-  });
-
-  it('skips Tier 4 when Tier 3 already returned ≥ 0.85 confidence', async () => {
-    const groq = mockGroq(
-      { category: 'Food', confidence: 0.9, rationale: 'confident enough' },
-    );
-    const brave = mockBrave([{ title: 't', snippet: 's', url: 'u' }]);
-
-    const result = await categorize(
-      makeTx({ merchantRaw: 'UNKNOWN MERCHANT' }),
-      { ...baseCtx, groq, brave },
-    );
-
-    expect(groq.calls.count).toBe(1);
-    expect(brave.calls.count).toBe(0);
-    expect(result.picked?.source).toBe('groq');
-  });
-
-  it('skips Tier 4 entirely when an alias has auto-tagged', async () => {
-    const groq = mockGroq({ category: 'Food', confidence: 0.9, rationale: '' });
-    const brave = mockBrave([{ title: 't', snippet: 's', url: 'u' }]);
-
-    const result = await categorize(
-      makeTx({ merchantRaw: 'BUNDL TECHNOLOGIES' }),
-      { ...baseCtx, groq, brave },
-    );
-
-    expect(groq.calls.count).toBe(0);
-    expect(brave.calls.count).toBe(0);
-    expect(result.picked?.source).toBe('alias');
-  });
-
-  it('skips Tier 4 when Brave returns no results', async () => {
-    const groq = mockGroq(
-      { category: null, confidence: 0, rationale: '' },
-      { category: 'Food', confidence: 0.9, rationale: 'should not be reached' },
-    );
-    const brave = mockBrave([]); // empty
-
-    const result = await categorize(
-      makeTx({ merchantRaw: 'UNKNOWN' }),
-      { ...baseCtx, groq, brave },
-    );
-
-    expect(brave.calls.count).toBe(1);
-    // Groq called once for Tier 3; not called again for Tier 4 since Brave was empty
-    expect(groq.calls.count).toBe(1);
-    expect(result.signals.find((s) => s.source === 'brave_groq')).toBeUndefined();
-  });
-
-  it('uses "India" anchor when no city is supplied to enrichment', async () => {
-    const groq = mockGroq(
-      { category: null, confidence: 0, rationale: '' },
-      { category: 'Food', confidence: 0.7, rationale: 'guess' },
-    );
-    const brave = mockBrave([
-      { title: 't', snippet: 's', url: 'u' },
-    ]);
-
-    await categorize(
-      makeTx({ merchantRaw: 'UNKNOWN' }),
-      { ...baseCtx, groq, brave },
-      // no enrichment.city
-    );
-
-    expect(brave.calls.lastInput?.city).toBeUndefined();
-  });
-});

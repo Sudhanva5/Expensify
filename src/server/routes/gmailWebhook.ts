@@ -20,10 +20,6 @@ import {
   HttpGroqCategorizer,
   type GroqCategorizer,
 } from '../../categorize/groq.js';
-import {
-  HttpBraveSearchClient,
-  type BraveSearchClient,
-} from '../../categorize/brave.js';
 
 const tokenVerifier = new OAuth2Client();
 
@@ -51,12 +47,6 @@ function buildOptionalGroq(): GroqCategorizer | undefined {
   const key = process.env['GROQ_API_KEY'];
   if (!key) return undefined;
   return new HttpGroqCategorizer({ apiKey: key });
-}
-
-function buildOptionalBrave(): BraveSearchClient | undefined {
-  const key = process.env['BRAVE_SEARCH_API_KEY'];
-  if (!key) return undefined;
-  return new HttpBraveSearchClient({ apiKey: key });
 }
 
 export async function gmailWebhookRoute(app: FastifyInstance): Promise<void> {
@@ -102,7 +92,6 @@ export async function gmailWebhookRoute(app: FastifyInstance): Promise<void> {
 
     const ctx = await buildCategorizeContextFromDb({
       ...(buildOptionalGroq() ? { groq: buildOptionalGroq()! } : {}),
-      ...(buildOptionalBrave() ? { brave: buildOptionalBrave()! } : {}),
     });
 
     for (const msg of messages) {

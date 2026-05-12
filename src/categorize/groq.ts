@@ -3,7 +3,6 @@
 
 import { z } from 'zod';
 import { CATEGORIES, type CategoryName } from './types.js';
-import type { BraveSearchResult } from './brave.js';
 import type { NearbyPlace } from '../services/places.js';
 
 const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
@@ -17,11 +16,12 @@ export interface GroqCategorizeInput {
   direction: 'in' | 'out';
   instrument: string;
   isAutopay: boolean;
-  // Optional Tier-4 grounding: web search results about the merchant.
-  webContext?: BraveSearchResult[];
   // Optional Places-tier grounding: businesses near the transaction location.
   // When supplied, Groq picks the most likely candidate AND returns its name
-  // so we can update merchantNormalized.
+  // so we can update merchantNormalized. (Currently the live system uses a
+  // static type→category mapper instead of Groq for this — see
+  // src/services/placesTypeMapper.ts. Kept on the input shape so we can
+  // re-introduce LLM-assisted disambiguation as a fallback later.)
   placesContext?: NearbyPlace[];
 }
 
@@ -45,14 +45,6 @@ export function buildGroqPrompt(input: GroqCategorizeInput): string {
   const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][ist.getUTCDay()];
   const date = `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
   const time = `${pad(ist.getUTCHours())}:${pad(ist.getUTCMinutes())}`;
-
-  const webSection =
-    input.webContext && input.webContext.length > 0
-      ? `\nWeb search results about this merchant (use these to identify what kind of business it is):
-${input.webContext
-  .map((r, i) => `${i + 1}. ${r.title}\n   ${r.snippet}`)
-  .join('\n')}\n`
-      : '';
 
   const placesSection =
     input.placesContext && input.placesContext.length > 0
@@ -82,7 +74,7 @@ Transaction:
 - Direction: ${input.direction === 'out' ? 'outgoing spend' : 'incoming credit'}
 - Instrument: ${input.instrument}
 - Auto-pay: ${input.isAutopay ? 'yes' : 'no'}
-${placesSection}${webSection}
+${placesSection}
 Indian context hints:
 - Personal UPI handles: @oksbi, @okaxis, @okhdfcbank, @okicici. Local-part shaped like a person's name = Personal Transfer.
 - Merchant UPI handles: @ybl with q-prefix usually means a small business.

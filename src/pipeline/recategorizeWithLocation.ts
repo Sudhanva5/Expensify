@@ -118,9 +118,7 @@ export async function recategorizeWithLocation(opts: {
       categoryId: catRow.id,
       status: 'resolved',
       confidence: match.confidence,
-      // Reuse existing enum slot — Places+typeMapper plays the same role
-      // as the previous Places+Groq path used to.
-      signalSource: 'brave_groq',
+      signalSource: 'places',
       // Snap location to the Places centroid so the "open in Maps" tap
       // lands on the storefront, not the phone's GPS.
       locationLat: chosen.lat || tx.locationLat,

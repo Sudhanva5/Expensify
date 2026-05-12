@@ -20,13 +20,10 @@ import type {
 } from './types.js';
 import { AUTO_TAG_CONFIDENCE_THRESHOLD } from './types.js';
 
-// Tier 4 fires only if Tier 3 hasn't produced at least this much confidence.
-const TIER4_CONFIDENCE_FLOOR = 0.85;
-
 export async function categorize(
   tx: ParsedTransaction,
   ctx: CategorizeContext,
-  enrichment: Enrichment = {},
+  _enrichment: Enrichment = {},
 ): Promise<CategorizationResult> {
   const merchantNormalized = stripRoutingPrefix(tx.merchantRaw, ctx.routingPrefixes);
 
@@ -144,38 +141,11 @@ export async function categorize(
     }
   }
 
-  // Tier 4 — Brave Search → Groq synthesis. Only fires if:
-  //   - both groq + brave are configured
-  //   - we still don't have an auto-tag-eligible signal
-  //   - tier 3 didn't already give us a confidence above the floor
-  const tier3StrongEnough = signals.some(
-    (s) => s.source === 'groq' && s.confidence >= TIER4_CONFIDENCE_FLOOR,
-  );
-  if (
-    ctx.groq &&
-    ctx.brave &&
-    !hasAutoTag &&
-    !tier3StrongEnough
-  ) {
-    const webContext = await ctx.brave.search({
-      merchant: merchantNormalized,
-      city: enrichment.city,
-    });
-    if (webContext.length > 0) {
-      const out = await ctx.groq.categorize({
-        ...groqInputCommon,
-        webContext,
-      });
-      if (out.category !== null) {
-        signals.push({
-          source: 'brave_groq',
-          category: out.category,
-          confidence: out.confidence,
-          details: `Brave+Groq: ${out.rationale}`,
-        });
-      }
-    }
-  }
+  // Note: there used to be a Tier 4 here that grounded Groq with Brave Search
+  // results for unknown merchants. Removed — the live system instead uses
+  // Google Places via recategorizeWithLocation once iOS uploads GPS, which
+  // gives a much stronger signal (real business name + structured types)
+  // than scraping search snippets ever did.
 
   const picked = pickHighestConfidence(signals);
   const status =

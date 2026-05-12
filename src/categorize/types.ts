@@ -18,7 +18,10 @@ export type SignalSource =
   | 'user_rule'
   | 'merchant_pattern'
   | 'groq'
-  | 'brave_groq';
+  // Set by recategorizeWithLocation after iOS uploads GPS and a nearby
+  // Place's types map to one of our V1 categories. This is the *only*
+  // signal source where merchantNormalized comes from Google Places.
+  | 'places';
 
 export interface CategorizationSignal {
   source: SignalSource;
@@ -104,13 +107,12 @@ export interface CategorizeContext {
   rules: UserRule[];
   // Optional Tier 3 — when undefined, Groq step is skipped entirely.
   groq?: import('./groq.js').GroqCategorizer;
-  // Optional Tier 4 — Brave web search to ground Groq for unknown merchants.
-  // Both groq AND brave must be present for Tier 4 to run.
-  brave?: import('./brave.js').BraveSearchClient;
 }
 
 export interface Enrichment {
-  // Reverse-geocoded city derived from the iOS GPS ping. Optional —
-  // when missing, Brave search uses "India" as the geographic anchor.
+  // Reverse-geocoded city derived from the iOS GPS ping. Currently unused
+  // by the categorize pipeline (Places resolution happens in a separate
+  // recategorize step after location upload) but kept on the interface so
+  // future tiers can use it without a signature change.
   city?: string;
 }

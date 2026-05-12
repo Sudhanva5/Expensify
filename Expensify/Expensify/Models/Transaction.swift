@@ -48,7 +48,11 @@ struct Transaction: Identifiable, Hashable {
         case userRule = "user_rule"
         case merchantPattern = "merchant_pattern"
         case groq
-        case braveGroq = "brave_groq"
+        /// Set by the backend's recategorizeWithLocation step — means we
+        /// looked up nearby Google Places and one of them mapped to a V1
+        /// category via the static type map. This is the only signal source
+        /// where `merchantNormalized` carries an actual storefront name.
+        case places
 
         /// Human-readable "why?" tag for the review card.
         var label: String {
@@ -58,7 +62,8 @@ struct Transaction: Identifiable, Hashable {
             case .vpaShape: return "VPA pattern"
             case .userRule: return "Your rule"
             case .merchantPattern: return "Past tagging"
-            case .groq, .braveGroq: return "AI suggestion"
+            case .groq: return "AI suggestion"
+            case .places: return "Nearby place"
             }
         }
     }
@@ -82,6 +87,20 @@ extension Transaction {
     var hasResolvedMerchant: Bool {
         !merchantNormalized.isEmpty &&
         merchantNormalized.caseInsensitiveCompare(merchantRaw) != .orderedSame
+    }
+
+    /// True if the row was enriched by the Places + location flow. Used as
+    /// the stronger gate for "show the info button" — covers the edge case
+    /// where the Places display name happens to equal the raw payee string.
+    var wasPlacesResolved: Bool {
+        signalSource == .places
+    }
+
+    /// Should we surface the small ⓘ next to the title? Either we have a
+    /// different normalized name on file, or the signalSource tells us this
+    /// row went through the Places step.
+    var shouldShowPlacesInfoButton: Bool {
+        wasPlacesResolved || hasResolvedMerchant
     }
 
     /// True if lat/lng were actually captured (not just "awaiting" or "missed").

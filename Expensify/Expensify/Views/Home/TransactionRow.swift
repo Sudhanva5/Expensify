@@ -64,7 +64,7 @@ struct TransactionRow: View {
             titleLabel
                 .layoutPriority(1)
 
-            if transaction.hasResolvedMerchant {
+            if transaction.shouldShowPlacesInfoButton {
                 Button {
                     showPlacesPopover.toggle()
                 } label: {
@@ -121,10 +121,11 @@ struct TransactionRow: View {
     }
 
     /// Title text shown on the row. When we have a Places resolution, prefer
-    /// the raw payee (preserves what the bank actually said); otherwise just
-    /// show whatever the row holds.
+    /// the raw payee (preserves what the bank actually said) so the info
+    /// button can reveal the Places-resolved name as the "what is this place
+    /// really" peek. Otherwise just show whatever the row holds.
     private var titleText: String {
-        if transaction.hasResolvedMerchant, !transaction.merchantRaw.isEmpty {
+        if transaction.shouldShowPlacesInfoButton, !transaction.merchantRaw.isEmpty {
             return transaction.merchantRaw
         }
         return transaction.displayMerchant

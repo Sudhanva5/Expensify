@@ -67,39 +67,6 @@ describe('buildGroqPrompt', () => {
     expect(p).toContain('UPI VPA: "q201985284@ybl"');
   });
 
-  it('renders webContext when supplied (Tier-4 grounding)', () => {
-    const p = buildGroqPrompt({
-      merchantRaw: 'X',
-      merchantNormalized: 'X',
-      vpa: null,
-      amountInr: 100,
-      occurredAt: new Date(),
-      direction: 'out',
-      instrument: 'account_5264',
-      isAutopay: false,
-      webContext: [
-        { title: 'A kirana shop', snippet: 'in Jayanagar', url: 'https://x' },
-      ],
-    });
-    expect(p).toContain('Web search results');
-    expect(p).toContain('A kirana shop');
-    expect(p).toContain('in Jayanagar');
-  });
-
-  it('omits the web section when webContext is empty', () => {
-    const p = buildGroqPrompt({
-      merchantRaw: 'X',
-      merchantNormalized: 'X',
-      vpa: null,
-      amountInr: 100,
-      occurredAt: new Date(),
-      direction: 'out',
-      instrument: 'account_5264',
-      isAutopay: false,
-      webContext: [],
-    });
-    expect(p).not.toContain('Web search results');
-  });
 });
 
 describe('parseGroqResponse', () => {
