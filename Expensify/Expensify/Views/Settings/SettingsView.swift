@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Modal sheet presented when the user taps the avatar in any tab's nav bar.
-/// Shows profile, per-category budgets, and account actions.
+/// Settings sheet — presented from the avatar in any tab's nav bar.
+/// Cred-style: lowercase section labels, tight typography, restrained color.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var budgets: [Budget] = MockData.budgets
@@ -9,69 +9,56 @@ struct SettingsView: View {
     @State private var pingState: PingState = .idle
     @State private var pingResult: APIClient.PingResult?
 
-    enum PingState {
-        case idle
-        case running
-        case done
-    }
+    enum PingState { case idle, running, done }
 
     var body: some View {
         NavigationStack {
-            List {
-                profileSection
-                connectionSection
-                budgetsSection
-                accountSection
+            ZStack {
+                AppColor.canvas.ignoresSafeArea()
+
+                List {
+                    profileSection
+                    connectionSection
+                    budgetsSection
+                    accountSection
+                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(AppColor.canvas)
+                .listSectionSpacing(.compact)
             }
-            .listStyle(.insetGrouped)
-            .navigationTitle("Settings")
+            .navigationTitle("settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button("done") { dismiss() }
+                        .foregroundStyle(AppColor.textPrimary)
                 }
             }
         }
     }
 
-    // MARK: - Sections
-
     private var profileSection: some View {
-        Section("Profile") {
+        Section {
             HStack(spacing: 12) {
                 Text("SA")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(Color.accentColor)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(AppColor.textPrimary)
+                    .frame(width: 48, height: 48)
+                    .background(AppColor.avatarFill)
                     .clipShape(Circle())
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Sudhanva")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(AppColor.textPrimary)
                     Text("sm.acharya@scaler.com")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(AppFont.caption)
+                        .foregroundStyle(AppColor.textTertiary)
                 }
                 Spacer()
             }
             .padding(.vertical, 4)
-        }
-    }
-
-    private var budgetsSection: some View {
-        Section {
-            ForEach($budgets) { $budget in
-                NavigationLink {
-                    BudgetEditView(budget: $budget)
-                } label: {
-                    BudgetSummaryRow(budget: budget)
-                }
-            }
-        } header: {
-            Text("Budgets")
-        } footer: {
-            Text("Set a monthly limit per category. We'll notify you as you approach or cross it.")
         }
     }
 
@@ -81,34 +68,24 @@ struct SettingsView: View {
                 Task { await runPing() }
             } label: {
                 HStack {
-                    Text("Test backend connection")
+                    Text("test connection")
+                        .foregroundStyle(AppColor.textPrimary)
                     Spacer()
                     if pingState == .running {
-                        ProgressView()
+                        ProgressView().controlSize(.small)
                     }
                 }
             }
             .disabled(pingState == .running)
 
             if let result = pingResult {
-                pingRow("GET /health", ok: result.healthOK, error: result.healthError)
-                pingRow("POST /devices/register (auth)", ok: result.authedOK, error: result.authedError)
-                if let host = Constants.baseURL.host {
-                    HStack {
-                        Text("Host")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(host)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
+                pingRow("health", ok: result.healthOK, error: result.healthError)
+                pingRow("auth", ok: result.authedOK, error: result.authedError)
             }
         } header: {
-            Text("Connection")
-        } footer: {
-            Text("Health is unauthenticated; auth call uses your API_TOKEN. Both should pass.")
+            Text("connection")
+                .font(AppFont.sectionLabel)
+                .foregroundStyle(AppColor.textTertiary)
         }
     }
 
@@ -116,14 +93,15 @@ struct SettingsView: View {
     private func pingRow(_ label: String, ok: Bool, error: String?) -> some View {
         HStack(alignment: .top) {
             Image(systemName: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(ok ? .green : .red)
+                .foregroundStyle(ok ? AppColor.inflow : .red)
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
-                    .font(.subheadline)
+                    .font(.system(size: 15))
+                    .foregroundStyle(AppColor.textPrimary)
                 if let error, !ok {
                     Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(AppFont.caption)
+                        .foregroundStyle(AppColor.textSecondary)
                         .lineLimit(3)
                 }
             }
@@ -139,13 +117,35 @@ struct SettingsView: View {
         pingState = .done
     }
 
-    private var accountSection: some View {
-        Section("Account") {
-            Button(role: .destructive) {
-                // V1: stub
-            } label: {
-                Text("Sign out")
+    private var budgetsSection: some View {
+        Section {
+            ForEach($budgets) { $budget in
+                NavigationLink {
+                    BudgetEditView(budget: $budget)
+                } label: {
+                    BudgetSummaryRow(budget: budget)
+                }
             }
+        } header: {
+            Text("budgets")
+                .font(AppFont.sectionLabel)
+                .foregroundStyle(AppColor.textTertiary)
+        } footer: {
+            Text("set a monthly limit per category. we'll notify you as you approach or cross it.")
+                .font(AppFont.caption)
+                .foregroundStyle(AppColor.textTertiary)
+        }
+    }
+
+    private var accountSection: some View {
+        Section {
+            Button(role: .destructive) { } label: {
+                Text("sign out")
+            }
+        } header: {
+            Text("account")
+                .font(AppFont.sectionLabel)
+                .foregroundStyle(AppColor.textTertiary)
         }
     }
 }
@@ -156,22 +156,26 @@ private struct BudgetSummaryRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: budget.category.symbolName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(AppColor.textPrimary)
                 .frame(width: 24, height: 24)
-                .foregroundStyle(budget.category.tint)
+                .background(AppColor.avatarFill)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
             Text(budget.category.shortName)
-                .font(.subheadline)
+                .font(.system(size: 15))
+                .foregroundStyle(AppColor.textPrimary)
 
             Spacer()
 
             Text(limitString)
-                .font(.subheadline)
-                .foregroundStyle(budget.isSet ? .primary : .secondary)
+                .font(.system(size: 14, weight: .medium).monospacedDigit())
+                .foregroundStyle(budget.isSet ? AppColor.textPrimary : AppColor.textTertiary)
         }
     }
 
     private var limitString: String {
-        guard let amount = budget.monthlyLimitInr else { return "Not set" }
+        guard let amount = budget.monthlyLimitInr else { return "not set" }
         let value = NSDecimalNumber(decimal: amount).doubleValue
         let f = NumberFormatter()
         f.numberStyle = .decimal

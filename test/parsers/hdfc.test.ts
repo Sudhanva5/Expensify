@@ -180,6 +180,25 @@ describe('HDFC parser — Template D extra: paytm-VPA merchant via account', () 
   });
 });
 
+describe('HDFC parser — Template D: CRED Club credit-card-bill payment via UPI', () => {
+  it('parses ₹26,766 to cred.club@axisb (HDFC bill payment)', () => {
+    const result = parseHdfcEmail({
+      subject: 'UPI Transaction Alert',
+      body: loadFixture('upi-debit-cred-club.txt'),
+      receivedAt: new Date('2026-05-01T08:00:00Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.template).toBe('upi_debit');
+    expect(result.data.amountMinor).toBe(2676600n); // ₹26,766.00
+    expect(result.data.merchantRaw).toBe('CRED Club');
+    expect(result.data.vpa).toBe('cred.club@axisb');
+    expect(result.data.instrument).toBe('account_5264');
+    expect(result.data.externalRef).toBe('648727315649');
+  });
+});
+
 describe('HDFC parser — Template E: RuPay CC UPI debit', () => {
   it('parses ₹80 from RuPay XX2668 to a paytm QR merchant', () => {
     const result = parseHdfcEmail({

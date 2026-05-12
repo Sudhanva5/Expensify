@@ -1,6 +1,8 @@
 import SwiftUI
 
-/// Row in the Categories tab — icon, label, total spent, and a fill bar.
+/// Per-category row in the Categories tab. Restrained: small monochrome
+/// icon, name in primary text, amount in primary, share-of-total as a hair
+/// of secondary text. Bar is a thin grey track with a single accent fill.
 struct CategoryRow: View {
     let category: Category
     let totalSpent: Decimal
@@ -10,58 +12,53 @@ struct CategoryRow: View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
                 Image(systemName: category.symbolName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(AppColor.textPrimary)
                     .frame(width: 28, height: 28)
-                    .foregroundStyle(category.tint)
-                    .background(category.tint.opacity(0.15))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .background(AppColor.avatarFill)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                 Text(category.shortName)
-                    .font(.subheadline.weight(.medium))
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(AppColor.textPrimary)
 
                 Spacer()
 
-                Text(amountString)
-                    .font(.subheadline.weight(.semibold))
+                AmountText(amount: totalSpent, direction: .out)
 
-                Text(percentString)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 40, alignment: .trailing)
+                Text("\(Int((percentageOfTotal * 100).rounded()))%")
+                    .font(.system(size: 12, weight: .medium).monospacedDigit())
+                    .foregroundStyle(AppColor.textTertiary)
+                    .frame(width: 36, alignment: .trailing)
             }
 
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color(.tertiarySystemFill))
+                        .fill(AppColor.hairline.opacity(0.7))
                     Capsule()
-                        .fill(category.tint)
-                        .frame(width: max(8, proxy.size.width * percentageOfTotal))
+                        .fill(AppColor.textPrimary)
+                        .frame(width: max(6, proxy.size.width * percentageOfTotal))
                 }
             }
-            .frame(height: 6)
+            .frame(height: 3)
+            .padding(.leading, 40)  // align bar with category name (after icon)
         }
         .padding(.vertical, 4)
-    }
-
-    private var amountString: String {
-        let value = NSDecimalNumber(decimal: totalSpent).doubleValue
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.maximumFractionDigits = 0
-        return "₹\(f.string(from: NSNumber(value: value)) ?? String(value))"
-    }
-
-    private var percentString: String {
-        "\(Int((percentageOfTotal * 100).rounded()))%"
     }
 }
 
 #Preview {
     List {
         CategoryRow(category: .food, totalSpent: 4250, percentageOfTotal: 0.69)
+            .listRowSeparator(.hidden)
         CategoryRow(category: .travel, totalSpent: 1200, percentageOfTotal: 0.20)
+            .listRowSeparator(.hidden)
         CategoryRow(category: .personalTransfer, totalSpent: 500, percentageOfTotal: 0.08)
+            .listRowSeparator(.hidden)
         CategoryRow(category: .subscriptions, totalSpent: 192, percentageOfTotal: 0.03)
+            .listRowSeparator(.hidden)
     }
     .listStyle(.plain)
+    .background(AppColor.canvas)
 }

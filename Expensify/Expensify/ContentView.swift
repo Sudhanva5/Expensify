@@ -15,23 +15,24 @@ struct ContentView: View {
         TabView(selection: $selection) {
             HomeView(showSettings: $showSettings)
                 .tabItem {
-                    Label("Home", systemImage: selection == .home ? "house.fill" : "house")
+                    Label("home", systemImage: selection == .home ? "house.fill" : "house")
                 }
                 .tag(Tab.home)
 
             CategoriesView(showSettings: $showSettings)
                 .tabItem {
-                    Label("Categories", systemImage: selection == .categories ? "chart.pie.fill" : "chart.pie")
+                    Label("categories", systemImage: selection == .categories ? "chart.pie.fill" : "chart.pie")
                 }
                 .tag(Tab.categories)
 
             ActivityView(showSettings: $showSettings)
                 .tabItem {
-                    Label("Activity", systemImage: selection == .activity ? "bell.fill" : "bell")
+                    Label("review", systemImage: selection == .activity ? "bell.fill" : "bell")
                 }
                 .badge(store.reviewItems.count)
                 .tag(Tab.activity)
         }
+        .tint(AppColor.textPrimary)
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }

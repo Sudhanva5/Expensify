@@ -1,11 +1,18 @@
 import SwiftUI
 
-/// First tab. Welcome, date filter, transaction log fed by the live API.
+/// Home tab — Cred-style restrained list.
+///
+/// Layout (top to bottom):
+///   • Lowercase page title + greeting
+///   • Filter pills (sort / date scope)
+///   • Month section label
+///   • Transaction rows (no dividers)
+///   • Floating instrument dock at the bottom
 struct HomeView: View {
     @Binding var showSettings: Bool
     @Environment(TransactionStore.self) private var store
     @State private var range: DateRange = .defaultRange
-    @State private var instrumentFilter: String? = nil  // nil = "All"
+    @State private var instrumentFilter: String? = nil
 
     private var dateScoped: [Transaction] {
         store.transactions.filter { range.contains($0.occurredAt) }
@@ -27,145 +34,178 @@ struct HomeView: View {
             .sorted { $0.occurredAt > $1.occurredAt }
     }
 
-    /// Time-of-day-aware greeting. "Good morning" / afternoon / evening.
-    private var greeting: String {
-        let hour = Calendar.current.component(.hour, from: Date())
-        switch hour {
-        case 4..<12: return "Good morning"
-        case 12..<17: return "Good afternoon"
-        case 17..<22: return "Good evening"
-        default: return "Good night"
-        }
-    }
-
     var body: some View {
         NavigationStack {
-            list
-                .listStyle(.plain)
-                .refreshable { await store.refresh() }
-                .task {
-                    if store.transactions.isEmpty { await store.refresh() }
-                }
-                .navigationTitle("Expensify")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        AvatarButton(initials: "SA") { showSettings = true }
+            ZStack(alignment: .bottom) {
+                AppColor.canvas.ignoresSafeArea()
+
+                content
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .background(AppColor.canvas)
+                    .refreshable { await store.refresh() }
+                    .task {
+                        if store.transactions.isEmpty { await store.refresh() }
                     }
+                    .connectivityBanner(store: store)
+
+                if availableInstruments.count > 1 {
+                    InstrumentDock(
+                        instruments: availableInstruments,
+                        selected: $instrumentFilter
+                    )
                 }
-                .connectivityBanner(store: store)
+            }
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    AvatarButton(initials: "SA") { showSettings = true }
+                }
+            }
         }
     }
 
-    private var list: some View {
+    private var content: some View {
         List {
+            // Title block
             Section {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("transactions")
+                        .font(AppFont.pageTitle)
+                        .foregroundStyle(AppColor.textPrimary)
                     Text(greeting)
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundStyle(.primary)
-                    Text("Here's what your money's been up to.")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
+                        .font(AppFont.rowSubtitle)
+                        .foregroundStyle(AppColor.textSecondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 12, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 6, trailing: 20))
             }
 
+            // Date filter
             Section {
                 HStack {
                     DateRangeFilter(range: $range)
                     Spacer()
                 }
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 6, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
             }
 
-            if availableInstruments.count > 1 {
-                Section {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            InstrumentPill(
-                                label: "All",
-                                count: dateScoped.count,
-                                isSelected: instrumentFilter == nil
-                            ) {
-                                instrumentFilter = nil
-                            }
-                            ForEach(availableInstruments, id: \.instrument) { entry in
-                                InstrumentPill(
-                                    label: InstrumentLabel.display(for: entry.instrument),
-                                    count: entry.count,
-                                    isSelected: instrumentFilter == entry.instrument
-                                ) {
-                                    instrumentFilter = entry.instrument
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                    }
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-                }
-            }
-
+            // States
             if store.isLoading && store.transactions.isEmpty {
                 Section {
-                    LoadingRowView()
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("loading transactions…")
+                            .font(AppFont.rowSubtitle)
+                            .foregroundStyle(AppColor.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 28)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 }
             } else if filtered.isEmpty {
                 Section {
-                    EmptyRowsView(hasAnyTransactions: !store.transactions.isEmpty)
+                    EmptyHomeState(hasAnyTransactions: !store.transactions.isEmpty)
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                 }
             } else {
-                Section("Transactions") {
-                    ForEach(filtered) { tx in
-                        TransactionRow(transaction: tx)
+                // Group filtered transactions by month for the section label
+                ForEach(monthSections(), id: \.label) { section in
+                    Section {
+                        ForEach(section.transactions) { tx in
+                            TransactionRow(transaction: tx)
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                        }
+                    } header: {
+                        Text(section.label)
+                            .font(AppFont.sectionLabel)
+                            .foregroundStyle(AppColor.textTertiary)
+                            .padding(.top, 8)
+                            .padding(.bottom, 4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 20)
+                            .listRowInsets(EdgeInsets())
                     }
+                }
+
+                // Bottom padding so the instrument dock doesn't overlap the
+                // last row.
+                Section {
+                    Color.clear
+                        .frame(height: 80)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                 }
             }
         }
     }
-}
 
-private struct EmptyRowsView: View {
-    let hasAnyTransactions: Bool
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "tray")
-                .font(.system(size: 40))
-                .foregroundStyle(.tertiary)
-            Text(hasAnyTransactions ? "No transactions in this range" : "No transactions yet")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Text(hasAnyTransactions
-                 ? "Try a wider window from the date filter."
-                 : "Spend some money — it'll show up here once an HDFC alert lands in your inbox.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
+    private struct MonthSection: Identifiable {
+        let label: String
+        let transactions: [Transaction]
+        var id: String { label }
+    }
+
+    private func monthSections() -> [MonthSection] {
+        let cal = Calendar.current
+        let groups = Dictionary(grouping: filtered) { tx -> String in
+            let comps = cal.dateComponents([.year, .month], from: tx.occurredAt)
+            let date = cal.date(from: comps) ?? tx.occurredAt
+            let df = DateFormatter()
+            df.dateFormat = "MMMM yyyy"
+            return df.string(from: date).uppercased()
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 32)
+        return groups
+            .map { MonthSection(label: $0.key, transactions: $0.value) }
+            .sorted { lhs, rhs in
+                guard let l = lhs.transactions.first?.occurredAt,
+                      let r = rhs.transactions.first?.occurredAt else { return false }
+                return l > r
+            }
+    }
+
+    private var greeting: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        switch hour {
+        case 4..<12: return "good morning. here's where your money went."
+        case 12..<17: return "good afternoon. here's where your money went."
+        case 17..<22: return "good evening. here's where your money went."
+        default: return "late night. here's where your money went."
+        }
     }
 }
 
-private struct LoadingRowView: View {
+private struct EmptyHomeState: View {
+    let hasAnyTransactions: Bool
     var body: some View {
-        HStack(spacing: 8) {
-            ProgressView().controlSize(.small)
-            Text("Loading transactions…")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        VStack(spacing: 10) {
+            Image(systemName: "tray")
+                .font(.system(size: 36))
+                .foregroundStyle(AppColor.textTertiary)
+            Text(hasAnyTransactions ? "nothing in this range" : "no transactions yet")
+                .font(AppFont.rowSubtitle)
+                .foregroundStyle(AppColor.textSecondary)
+            Text(
+                hasAnyTransactions
+                    ? "widen the date filter to see more."
+                    : "spend something — it'll land here once HDFC emails it."
+            )
+            .font(AppFont.caption)
+            .foregroundStyle(AppColor.textTertiary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 24)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
+        .padding(.vertical, 48)
     }
 }
 

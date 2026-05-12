@@ -16,17 +16,20 @@ struct ActivityView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if store.isLoading && store.transactions.isEmpty {
-                    LoadingView()
-                } else if queue.isEmpty && pendingTags.isEmpty {
-                    EmptyStateView()
-                } else {
-                    cardStack
+            ZStack {
+                AppColor.canvas.ignoresSafeArea()
+                Group {
+                    if store.isLoading && store.transactions.isEmpty {
+                        LoadingView()
+                    } else if queue.isEmpty && pendingTags.isEmpty {
+                        EmptyStateView()
+                    } else {
+                        cardStack
+                    }
                 }
+                .connectivityBanner(store: store)
             }
-            .connectivityBanner(store: store)
-            .navigationTitle("Activity")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -53,13 +56,18 @@ struct ActivityView: View {
 
     @ViewBuilder
     private var cardStack: some View {
-        VStack(spacing: 16) {
-            VStack(spacing: 4) {
-                Text("\(min(swipedCount + 1, totalCount)) of \(totalCount) to review")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
+        VStack(spacing: 18) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("review")
+                    .font(AppFont.pageTitle)
+                    .foregroundStyle(AppColor.textPrimary)
+                Text("\(min(swipedCount + 1, totalCount)) of \(totalCount) — swipe to clear the queue")
+                    .font(AppFont.rowSubtitle)
+                    .foregroundStyle(AppColor.textSecondary)
             }
-            .padding(.top, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 4)
 
             ZStack {
                 ForEach(visibleCards.reversed()) { item in
@@ -72,19 +80,18 @@ struct ActivityView: View {
                     .zIndex(Double(visibleCards.count - depth))
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
 
             HStack {
-                Label("Needs tag", systemImage: "arrow.left")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                Label("needs tag", systemImage: "arrow.left")
+                    .font(AppFont.caption)
+                    .foregroundStyle(AppColor.textSecondary)
                 Spacer()
-                Label("Looks ok", systemImage: "arrow.right")
-                    .font(.caption)
-                    .foregroundStyle(.green)
+                Label("looks ok", systemImage: "arrow.right")
+                    .font(AppFont.caption)
+                    .foregroundStyle(AppColor.inflow)
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 8)
+            .padding(.horizontal, 28)
 
             Spacer()
         }

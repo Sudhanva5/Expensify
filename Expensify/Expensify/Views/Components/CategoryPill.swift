@@ -1,6 +1,8 @@
 import SwiftUI
 
-/// Small category tag pill. Used in transaction rows under the merchant name.
+/// Small category tag — icon + name in a soft neutral pill. Intentionally
+/// monochrome so it doesn't compete with the inflow-green / tap-blue
+/// accents (per the design principles in .impeccable.md).
 struct CategoryPill: View {
     let category: Category
     var compact: Bool = false
@@ -9,13 +11,14 @@ struct CategoryPill: View {
         HStack(spacing: 4) {
             Image(systemName: category.symbolName)
                 .font(.system(size: compact ? 9 : 10, weight: .semibold))
-            Text(category.shortName)
+            Text(category.shortName.lowercased())
                 .font(.system(size: compact ? 11 : 12, weight: .medium))
+                .lineLimit(1)
         }
-        .foregroundStyle(category.tint)
+        .foregroundStyle(AppColor.textPrimary)
         .padding(.horizontal, compact ? 7 : 8)
         .padding(.vertical, compact ? 3 : 4)
-        .background(category.tint.opacity(0.12))
+        .background(AppColor.avatarFill)
         .clipShape(Capsule())
     }
 }

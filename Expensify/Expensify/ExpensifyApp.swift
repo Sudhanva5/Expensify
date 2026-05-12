@@ -18,6 +18,12 @@ struct ExpensifyApp: App {
         WindowGroup {
             ContentView()
                 .environment(transactionStore)
+                // Force the whole app to light. Per .impeccable.md, this is
+                // a light-only product — money feels calmer in light, and
+                // we haven't designed a dark palette. Without this, iOS
+                // dark-mode settings would leak through (the inset-grouped
+                // form on Settings was the most visible offender).
+                .preferredColorScheme(.light)
         }
     }
 }

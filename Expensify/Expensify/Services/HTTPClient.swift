@@ -43,30 +43,44 @@ actor HTTPClient {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         var attempt = 0
         var lastError: Error?
+        let method = request.httpMethod ?? "GET"
+        let pathLabel = Self.shortPath(request.url)
+        let started = Date()
+
+        Self.log("→ \(method) \(pathLabel)")
 
         while attempt < Self.maxAttempts {
             attempt += 1
             do {
                 let (data, response) = try await session.data(for: request)
                 guard let http = response as? HTTPURLResponse else {
+                    Self.log("✗ \(method) \(pathLabel): non-HTTP response")
                     throw HTTPClientError.invalidResponse
                 }
 
                 // Retry 5xx (Railway transient). Never retry 4xx.
                 if (500...599).contains(http.statusCode) {
                     if attempt < Self.maxAttempts && Self.shouldRetry(statusCode: http.statusCode) {
+                        Self.log("↻ \(method) \(pathLabel): HTTP \(http.statusCode) — retry \(attempt)/\(Self.maxAttempts)")
                         try? await Task.sleep(nanoseconds: Self.backoffNs(attempt: attempt))
                         continue
                     }
                 }
 
+                let ms = Int(Date().timeIntervalSince(started) * 1000)
+                let mark = (200...299).contains(http.statusCode) ? "←" : "⚠"
+                Self.log("\(mark) \(method) \(pathLabel) → \(http.statusCode) (\(ms)ms)")
                 return (data, http)
             } catch {
                 lastError = error
                 if attempt < Self.maxAttempts && Self.shouldRetry(error: error) {
+                    let label = (error as? URLError).map { "\($0.code.rawValue)" } ?? "\(error)"
+                    Self.log("↻ \(method) \(pathLabel): \(label) — retry \(attempt)/\(Self.maxAttempts)")
                     try? await Task.sleep(nanoseconds: Self.backoffNs(attempt: attempt))
                     continue
                 }
+                let ms = Int(Date().timeIntervalSince(started) * 1000)
+                Self.log("✗ \(method) \(pathLabel) → \(error.localizedDescription) (\(ms)ms)")
                 throw error
             }
         }
@@ -81,21 +95,42 @@ actor HTTPClient {
             var req = URLRequest(url: baseURL.appendingPathComponent("/health"))
             req.httpMethod = "GET"
             req.timeoutInterval = 5
-            _ = try? await session.data(for: req)
-            #if DEBUG
-            print("[HTTPClient] warmup ping completed")
-            #endif
+            let started = Date()
+            do {
+                let (_, response) = try await session.data(for: req)
+                let ms = Int(Date().timeIntervalSince(started) * 1000)
+                if let http = response as? HTTPURLResponse {
+                    Self.log("⚡ warmup /health → \(http.statusCode) (\(ms)ms)")
+                } else {
+                    Self.log("⚡ warmup /health → non-HTTP (\(ms)ms)")
+                }
+            } catch {
+                Self.log("⚡ warmup /health failed: \(error.localizedDescription)")
+            }
         }
     }
 
     // MARK: - Internal
 
     private func recreateSession(reason: String) {
-        #if DEBUG
-        print("[HTTPClient] recreating session: \(reason)")
-        #endif
+        Self.log("◌ session recreated: \(reason)")
         session.invalidateAndCancel()
         session = Self.makeSession()
+    }
+
+    private static func log(_ message: String) {
+        #if DEBUG
+        print("[Net] \(message)")
+        #endif
+    }
+
+    private static func shortPath(_ url: URL?) -> String {
+        guard let url else { return "?" }
+        var path = url.path
+        if let q = url.query, !q.isEmpty {
+            path += "?" + q
+        }
+        return path.isEmpty ? "/" : path
     }
 
     // MARK: - Config

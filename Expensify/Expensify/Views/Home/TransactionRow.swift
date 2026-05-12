@@ -1,123 +1,94 @@
 import SwiftUI
 
-/// Transaction row used in the Home list and per-category detail. Layout:
+/// Transaction row. Cred-inspired, restrained color use.
 ///
-///   ┌────┐   Merchant Name                       -₹547.00
-///   │ 📍 │   [ 🍴 Food ]  [ 📍 Bengaluru ]   · 9 May 10:57
-///   └────┘
+///   ○ Avatar     Merchant Name                              ₹547.00
+///                [🍴 food]  [📍 Bengaluru]                  9 may '26
 ///
-/// Where:
-///   • Left tile is the location pin (tappable → Apple Maps) when we have
-///     coordinates; otherwise falls back to the category icon.
-///   • Title is the resolved merchant name (via Places + Groq) when we have
-///     one; otherwise the raw payee.
-///   • Category pill below the title, with the same tint as the icon.
-///   • Location chip (tappable → Maps too) sits next to the category pill.
-///   • Amount is on the right, monospaced, signed.
+/// Layout:
+///   • Avatar (favicon or initials) on the left
+///   • Top: merchant name (left) + amount (right)
+///   • Bottom-left: category tag + location tag (both compact)
+///   • Bottom-right: date in small tertiary text
+///
+/// Color is reserved for signal: green for inflows, blue for tappable
+/// map affordances. Everything else stays in the warm-neutral palette.
 struct TransactionRow: View {
     let transaction: Transaction
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            iconTile
+        HStack(alignment: .center, spacing: 14) {
+            MerchantAvatar(merchantName: transaction.displayMerchant, size: 44)
 
             VStack(alignment: .leading, spacing: 6) {
-                titleRow
-                metaRow
+                Text(transaction.displayMerchant)
+                    .font(AppFont.rowTitle)
+                    .foregroundStyle(AppColor.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                HStack(spacing: 6) {
+                    if let category = transaction.category {
+                        CategoryPill(category: category, compact: true)
+                    }
+                    if transaction.hasCoordinates,
+                       let lat = transaction.locationLat,
+                       let lng = transaction.locationLng {
+                        LocationMapChip(
+                            label: transaction.locationCity ?? transaction.locationLabel ?? "map",
+                            latitude: lat,
+                            longitude: lng,
+                            merchantLabel: transaction.displayMerchant
+                        )
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                AmountText(amount: transaction.amountInr, direction: transaction.direction)
+                Text(dateString)
+                    .font(.system(size: 11))
+                    .foregroundStyle(AppColor.textTertiary)
+            }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .contentShape(Rectangle())
     }
 
-    // MARK: - Pieces
-
-    private var iconTile: some View {
-        Group {
-            if transaction.hasCoordinates,
-               let lat = transaction.locationLat,
-               let lng = transaction.locationLng {
-                Button {
-                    MapsLinker.open(latitude: lat, longitude: lng, label: transaction.displayMerchant)
-                } label: {
-                    iconTileContent(symbol: "mappin.and.ellipse", tint: .blue)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Open in Maps")
-            } else {
-                iconTileContent(
-                    symbol: transaction.category?.symbolName ?? "wallet.pass",
-                    tint: transaction.category?.tint ?? .secondary
-                )
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func iconTileContent(symbol: String, tint: Color) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(tint.opacity(0.14))
-            Image(systemName: symbol)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(tint)
-        }
-        .frame(width: 44, height: 44)
-    }
-
-    private var titleRow: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(transaction.displayMerchant)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-
-            Spacer(minLength: 4)
-
-            Text(amountString)
-                .font(.system(size: 16, weight: .semibold).monospacedDigit())
-                .foregroundStyle(transaction.direction == .in ? Color.green : Color.primary)
-        }
-    }
-
-    private var metaRow: some View {
-        HStack(spacing: 6) {
-            if let category = transaction.category {
-                CategoryPill(category: category, compact: true)
-            }
-            LocationChip(
-                label: transaction.locationLabel,
-                status: transaction.locationStatus,
-                latitude: transaction.locationLat,
-                longitude: transaction.locationLng,
-                merchantLabel: transaction.displayMerchant,
-                compact: true
-            )
-            Spacer(minLength: 0)
-            Text(timeString)
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-        }
-    }
-
-    // MARK: - Strings
-
-    private var amountString: String {
-        let prefix = transaction.direction == .in ? "+ " : ""
-        let value = NSDecimalNumber(decimal: transaction.amountInr).doubleValue
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.maximumFractionDigits = 2
-        f.minimumFractionDigits = (value.truncatingRemainder(dividingBy: 1) == 0) ? 0 : 2
-        return "\(prefix)₹\(f.string(from: NSNumber(value: value)) ?? String(value))"
-    }
-
-    private var timeString: String {
+    /// Compact date — "9 May '26" — matches the reference's "11 May '26".
+    private var dateString: String {
         let df = DateFormatter()
-        df.dateFormat = "d MMM, HH:mm"
-        return df.string(from: transaction.occurredAt)
+        df.dateFormat = "d MMM ''yy"
+        return df.string(from: transaction.occurredAt).lowercased()
+    }
+}
+
+/// Small clickable map chip. Subtle blue (the only tap-affordance accent).
+private struct LocationMapChip: View {
+    let label: String
+    let latitude: Double
+    let longitude: Double
+    let merchantLabel: String
+
+    var body: some View {
+        Button {
+            MapsLinker.open(latitude: latitude, longitude: longitude, label: merchantLabel)
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "mappin.and.ellipse")
+                    .font(.system(size: 9, weight: .semibold))
+                Text(label.lowercased())
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(AppColor.tap)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(AppColor.tap.opacity(0.10))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -125,7 +96,9 @@ struct TransactionRow: View {
     List {
         ForEach(MockData.transactions) { tx in
             TransactionRow(transaction: tx)
+                .listRowSeparator(.hidden)
         }
     }
     .listStyle(.plain)
+    .background(AppColor.canvas)
 }

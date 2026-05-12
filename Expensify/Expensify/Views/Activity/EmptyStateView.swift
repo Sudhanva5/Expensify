@@ -1,18 +1,19 @@
 import SwiftUI
 
-/// Shown in the Activity tab when the review queue is empty.
+/// Activity tab when the review queue is empty.
 struct EmptyStateView: View {
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             Spacer()
             Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.green)
-            Text("All caught up")
-                .font(.title2.weight(.semibold))
-            Text("No transactions need review.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 56))
+                .foregroundStyle(AppColor.inflow)
+            Text("all caught up")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(AppColor.textPrimary)
+            Text("nothing needs your review.")
+                .font(AppFont.rowSubtitle)
+                .foregroundStyle(AppColor.textSecondary)
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -22,4 +23,5 @@ struct EmptyStateView: View {
 
 #Preview {
     EmptyStateView()
+        .background(AppColor.canvas)
 }

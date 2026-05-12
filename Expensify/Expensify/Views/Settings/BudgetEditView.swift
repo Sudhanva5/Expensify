@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Pushed when the user taps a budget row in Settings. Lets them set the
-/// monthly limit and toggle alert thresholds.
+/// Pushed when the user taps a budget row in Settings.
+/// Cred-style lowercase section labels, restrained typography.
 struct BudgetEditView: View {
     @Binding var budget: Budget
     @Environment(\.dismiss) private var dismiss
@@ -21,44 +21,60 @@ struct BudgetEditView: View {
     }
 
     var body: some View {
-        Form {
-            Section {
-                HStack {
-                    Text("₹")
-                        .foregroundStyle(.secondary)
-                    TextField("e.g. 5000", text: $draftLimit)
-                        .keyboardType(.numberPad)
-                }
-            } header: {
-                Text("Monthly limit")
-            } footer: {
-                Text("Spending in this category resets at the start of every month.")
-            }
+        ZStack {
+            AppColor.canvas.ignoresSafeArea()
 
-            Section {
-                Toggle("Warn at 80%", isOn: $budget.alertAt80)
-                Toggle("Notify at 100%", isOn: $budget.alertAt100)
-                Toggle("Alert when over budget (110%)", isOn: $budget.alertAt110)
-            } header: {
-                Text("Alerts")
-            } footer: {
-                Text("You'll get a push notification once per threshold per month.")
-            }
+            Form {
+                Section {
+                    HStack {
+                        Text("₹")
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            .foregroundStyle(AppColor.textTertiary)
+                        TextField("e.g. 5000", text: $draftLimit)
+                            .font(.system(size: 16, weight: .medium, design: .rounded).monospacedDigit())
+                            .keyboardType(.numberPad)
+                    }
+                } header: {
+                    Text("monthly limit")
+                        .font(AppFont.sectionLabel)
+                        .foregroundStyle(AppColor.textTertiary)
+                } footer: {
+                    Text("spending in this category resets at the start of every month.")
+                        .font(AppFont.caption)
+                        .foregroundStyle(AppColor.textTertiary)
+                }
 
-            Section {
-                Button(role: .destructive) {
-                    budget.monthlyLimitInr = nil
-                    draftLimit = ""
-                } label: {
-                    Text("Remove budget")
+                Section {
+                    Toggle("warn at 80%", isOn: $budget.alertAt80)
+                    Toggle("notify at 100%", isOn: $budget.alertAt100)
+                    Toggle("alert when over budget (110%)", isOn: $budget.alertAt110)
+                } header: {
+                    Text("alerts")
+                        .font(AppFont.sectionLabel)
+                        .foregroundStyle(AppColor.textTertiary)
+                } footer: {
+                    Text("you'll get a push notification once per threshold per month.")
+                        .font(AppFont.caption)
+                        .foregroundStyle(AppColor.textTertiary)
+                }
+
+                Section {
+                    Button(role: .destructive) {
+                        budget.monthlyLimitInr = nil
+                        draftLimit = ""
+                    } label: {
+                        Text("remove budget")
+                    }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(AppColor.canvas)
         }
-        .navigationTitle(budget.category.shortName)
+        .navigationTitle(budget.category.shortName.lowercased())
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Save") {
+                Button("save") {
                     if let value = Decimal(string: draftLimit), value > 0 {
                         budget.monthlyLimitInr = value
                     } else {
@@ -66,6 +82,7 @@ struct BudgetEditView: View {
                     }
                     dismiss()
                 }
+                .foregroundStyle(AppColor.textPrimary)
             }
         }
     }

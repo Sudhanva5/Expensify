@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Avatar pill in the navigation bar. Tapping it opens the Settings sheet.
+/// Profile avatar in the nav bar — opens Settings on tap.
 struct AvatarButton: View {
     let initials: String
     let action: () -> Void
@@ -8,11 +8,14 @@ struct AvatarButton: View {
     var body: some View {
         Button(action: action) {
             Text(initials)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(AppColor.textPrimary)
                 .frame(width: 32, height: 32)
-                .background(Color.accentColor)
+                .background(AppColor.avatarFill)
                 .clipShape(Circle())
+                .overlay(
+                    Circle().stroke(AppColor.hairline, lineWidth: 0.5)
+                )
         }
         .accessibilityLabel("Settings")
     }
@@ -21,7 +24,7 @@ struct AvatarButton: View {
 #Preview {
     NavigationStack {
         Text("Demo")
-            .navigationTitle("Home")
+            .navigationTitle("home")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     AvatarButton(initials: "SA") { }
