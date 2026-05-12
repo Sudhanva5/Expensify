@@ -17,11 +17,7 @@ struct ActivityView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if store.loadError != nil {
-                    ErrorView(message: store.loadError ?? "") {
-                        Task { await store.refresh() }
-                    }
-                } else if store.isLoading && store.transactions.isEmpty {
+                if store.isLoading && store.transactions.isEmpty {
                     LoadingView()
                 } else if queue.isEmpty && pendingTags.isEmpty {
                     EmptyStateView()
@@ -29,6 +25,7 @@ struct ActivityView: View {
                     cardStack
                 }
             }
+            .connectivityBanner(store: store)
             .navigationTitle("Activity")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -10,6 +10,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        // Pre-warm the connection to Railway as the very first thing. Opens
+        // TCP+TLS to the host so the user's first /transactions fetch is
+        // instant. Fire and forget.
+        Task { await HTTPClient.shared.warmup(baseURL: Constants.baseURL) }
+
         // Ask for notification permission and register for APNs immediately
         // so silent pushes start arriving as soon as iOS is willing.
         Task { @MainActor in
@@ -61,6 +66,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     /// transactions stuck in 'awaiting' (because LPM, force-quit, or APNs
     /// throttling killed the silent push) get caught up.
     func applicationDidBecomeActive(_ application: UIApplication) {
+        // Foregrounding after backgrounding — same hygiene as cold launch.
+        // Pre-warm the HTTPClient connection (helps if TCP was dropped while
+        // backgrounded) and run the location backfill for awaiting txns.
+        Task { await HTTPClient.shared.warmup(baseURL: Constants.baseURL) }
         Task {
             await BackfillService.shared.backfillFromForeground()
         }

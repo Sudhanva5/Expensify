@@ -1,15 +1,32 @@
 import Foundation
 
 /// Single source of truth for transactions across all tabs. Backed by the
-/// Railway API. Views observe via `@Environment(TransactionStore.self)` and
-/// trigger refreshes through `.task`/`.refreshable`.
+/// Railway API via APIClient → HTTPClient. Exposes a rich `connectionState`
+/// so views can show appropriate banners; auto-retries every 10 s when in
+/// the .failing state.
 @MainActor
 @Observable
 final class TransactionStore {
     var transactions: [Transaction] = []
-    var isLoading: Bool = false
-    var loadError: String? = nil
+    var connectionState: ConnectionState = .idle
     var lastFetchedAt: Date? = nil
+
+    enum ConnectionState: Equatable {
+        case idle
+        case loading
+        case ok
+        case failing(message: String)
+    }
+
+    /// Back-compat conveniences for the views that already check these.
+    var isLoading: Bool {
+        if case .loading = connectionState { return true }
+        return false
+    }
+    var loadError: String? {
+        if case .failing(let msg) = connectionState { return msg }
+        return nil
+    }
 
     /// Items currently in the review queue.
     var reviewItems: [ReviewItem] {
@@ -34,16 +51,45 @@ final class TransactionStore {
             }
     }
 
-    /// Pull from the backend. Replaces in-memory state.
+    private var retryTask: Task<Void, Never>?
+    private static let retryDelaySeconds: UInt64 = 10
+
+    /// Pull from the backend. Replaces in-memory state on success; keeps
+    /// previous data visible on failure so the user isn't dropped to a
+    /// blank screen.
     func refresh() async {
-        isLoading = true
-        loadError = nil
+        // Don't pile concurrent fetches
+        if case .loading = connectionState { return }
+        connectionState = .loading
+
         do {
             transactions = try await APIClient.shared.fetchTransactions()
             lastFetchedAt = Date()
+            connectionState = .ok
+            cancelAutoRetry()
         } catch {
-            loadError = error.localizedDescription
+            connectionState = .failing(message: error.localizedDescription)
+            scheduleAutoRetry()
         }
-        isLoading = false
+    }
+
+    // MARK: - Auto-retry
+
+    private func scheduleAutoRetry() {
+        cancelAutoRetry()
+        retryTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.retryDelaySeconds * 1_000_000_000)
+            // After sleeping, only retry if we're still in the .failing
+            // state (user might have manually retried in the meantime).
+            if Task.isCancelled { return }
+            if case .failing = connectionState {
+                await refresh()
+            }
+        }
+    }
+
+    private func cancelAutoRetry() {
+        retryTask?.cancel()
+        retryTask = nil
     }
 }

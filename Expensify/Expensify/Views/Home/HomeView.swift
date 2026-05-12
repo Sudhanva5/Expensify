@@ -29,96 +29,91 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Hi, welcome to Expensify")
-                            .font(.title2.weight(.semibold))
-                        Text("Track every rupee that leaves your account.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 8, trailing: 16))
+            list
+                .listStyle(.plain)
+                .refreshable { await store.refresh() }
+                .task {
+                    if store.transactions.isEmpty { await store.refresh() }
                 }
-
-                Section {
-                    HStack {
-                        DateRangeFilter(range: $range)
-                        Spacer()
+                .navigationTitle("Expensify")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        AvatarButton(initials: "SA") { showSettings = true }
                     }
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
                 }
+                .connectivityBanner(store: store)
+        }
+    }
 
-                // Instrument filter pills — only show if there's more than
-                // one instrument in the current date scope. With just one,
-                // the filter is noise.
-                if availableInstruments.count > 1 {
-                    Section {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
+    private var list: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Hi, welcome to Expensify")
+                        .font(.title2.weight(.semibold))
+                    Text("Track every rupee that leaves your account.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 8, trailing: 16))
+            }
+
+            Section {
+                HStack {
+                    DateRangeFilter(range: $range)
+                    Spacer()
+                }
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+            }
+
+            if availableInstruments.count > 1 {
+                Section {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            InstrumentPill(
+                                label: "All",
+                                count: dateScoped.count,
+                                isSelected: instrumentFilter == nil
+                            ) {
+                                instrumentFilter = nil
+                            }
+                            ForEach(availableInstruments, id: \.instrument) { entry in
                                 InstrumentPill(
-                                    label: "All",
-                                    count: dateScoped.count,
-                                    isSelected: instrumentFilter == nil
+                                    label: InstrumentLabel.display(for: entry.instrument),
+                                    count: entry.count,
+                                    isSelected: instrumentFilter == entry.instrument
                                 ) {
-                                    instrumentFilter = nil
-                                }
-                                ForEach(availableInstruments, id: \.instrument) { entry in
-                                    InstrumentPill(
-                                        label: InstrumentLabel.display(for: entry.instrument),
-                                        count: entry.count,
-                                        isSelected: instrumentFilter == entry.instrument
-                                    ) {
-                                        instrumentFilter = entry.instrument
-                                    }
+                                    instrumentFilter = entry.instrument
                                 }
                             }
-                            .padding(.horizontal, 16)
                         }
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
+                        .padding(.horizontal, 16)
                     }
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
                 }
+            }
 
-                if let err = store.loadError {
-                    Section {
-                        ErrorRowView(message: err) {
-                            Task { await store.refresh() }
-                        }
+            if store.isLoading && store.transactions.isEmpty {
+                Section {
+                    LoadingRowView()
                         .listRowSeparator(.hidden)
-                    }
-                } else if store.isLoading && store.transactions.isEmpty {
-                    Section {
-                        LoadingRowView()
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                    }
-                } else if filtered.isEmpty {
-                    Section {
-                        EmptyRowsView(hasAnyTransactions: !store.transactions.isEmpty)
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                    }
-                } else {
-                    Section("Transactions") {
-                        ForEach(filtered) { tx in
-                            TransactionRow(transaction: tx)
-                        }
-                    }
+                        .listRowBackground(Color.clear)
                 }
-            }
-            .listStyle(.plain)
-            .refreshable { await store.refresh() }
-            .task {
-                if store.transactions.isEmpty { await store.refresh() }
-            }
-            .navigationTitle("Expensify")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    AvatarButton(initials: "SA") { showSettings = true }
+            } else if filtered.isEmpty {
+                Section {
+                    EmptyRowsView(hasAnyTransactions: !store.transactions.isEmpty)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
+            } else {
+                Section("Transactions") {
+                    ForEach(filtered) { tx in
+                        TransactionRow(transaction: tx)
+                    }
                 }
             }
         }
@@ -155,31 +150,6 @@ private struct LoadingRowView: View {
             Text("Loading transactions…")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
-    }
-}
-
-private struct ErrorRowView: View {
-    let message: String
-    let retry: () -> Void
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 28))
-                .foregroundStyle(.orange)
-            Text("Couldn't load transactions")
-                .font(.subheadline.weight(.medium))
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-            Button("Retry", action: retry)
-                .buttonStyle(.bordered)
-                .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)

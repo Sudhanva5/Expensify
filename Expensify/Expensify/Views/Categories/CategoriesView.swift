@@ -52,11 +52,7 @@ struct CategoriesView: View {
                     .listRowSeparator(.hidden)
                 }
 
-                if store.loadError != nil {
-                    EmptyCategoriesView(message: "Couldn't load. Pull down to retry.")
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                } else if store.isLoading && store.transactions.isEmpty {
+                if store.isLoading && store.transactions.isEmpty {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
                         Text("Loading…")
@@ -98,6 +94,7 @@ struct CategoriesView: View {
                     AvatarButton(initials: "SA") { showSettings = true }
                 }
             }
+            .connectivityBanner(store: store)
         }
     }
 

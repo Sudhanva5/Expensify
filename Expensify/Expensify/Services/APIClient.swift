@@ -1,48 +1,45 @@
 import Foundation
 
-/// Tiny HTTP client for the iOS app to talk to the Railway backend.
-/// One actor instance, shared. All calls require the static API_TOKEN.
+/// Thin REST wrapper for the Expensify backend on Railway. All requests
+/// go through HTTPClient, which owns retries, timeouts, and connection
+/// lifecycle management.
 actor APIClient {
     static let shared = APIClient()
 
-    private let session: URLSession = .shared
     private let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.keyEncodingStrategy = .convertToSnakeCase
         return e
     }()
 
-    // MARK: - Public
+    private let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.keyDecodingStrategy = .convertFromSnakeCase
+        return d
+    }()
 
-    /// Result of a connectivity test.
+    // MARK: - Connectivity test (used by Settings → Test connection)
+
     struct PingResult {
-        let healthOK: Bool          // GET /health unauthenticated
-        let authedOK: Bool          // POST /devices/register with a dummy token
+        let healthOK: Bool
+        let authedOK: Bool
         let healthError: String?
         let authedError: String?
     }
 
-    /// Hit /health (unauthenticated) to verify the network path, then a
-    /// read-only authenticated call to verify API_TOKEN matches between this
-    /// build and the backend env. Both checks are best-effort. Neither writes.
+    /// Test both unauthenticated reachability and authenticated identity.
+    /// Used by the Settings "Test connection" button. Read-only — never
+    /// mutates DB rows.
     func ping() async -> PingResult {
-        let healthURL = Constants.baseURL.appendingPathComponent("/health")
         var healthOK = false
         var healthErr: String? = nil
         do {
-            let (data, response) = try await session.data(from: healthURL)
-            if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
-                healthOK = true
-            } else if let http = response as? HTTPURLResponse {
-                healthErr = "HTTP \(http.statusCode): \(String(data: data, encoding: .utf8) ?? "")"
-            } else {
-                healthErr = "non-HTTP response"
-            }
+            let _: EmptyAck = try await getJSONNoAuth(path: "/health")
+            healthOK = true
         } catch {
             healthErr = error.localizedDescription
         }
 
-        // Auth test: read-only check. Won't mutate the DB.
         var authedOK = false
         var authedErr: String? = nil
         do {
@@ -62,8 +59,11 @@ actor APIClient {
 
     private struct EmptyAck: Decodable { let ok: Bool? }
 
+    // MARK: - Transactions
+
     /// Fetch the most recent transactions for the iOS UI.
     func fetchTransactions(limit: Int = 100) async throws -> [Transaction] {
+        struct Wire: Decodable {}
         var components = URLComponents(
             url: Constants.baseURL.appendingPathComponent("/transactions/"),
             resolvingAgainstBaseURL: false
@@ -71,33 +71,20 @@ actor APIClient {
         components?.queryItems = [URLQueryItem(name: "limit", value: String(limit))]
         guard let url = components?.url else { throw APIError.invalidResponse }
 
-        var req = URLRequest(url: url)
-        req.httpMethod = "GET"
-        req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
+        let (data, http) = try await get(url: url)
+        try ensure2xx(http: http, data: data)
 
-        let (data, response) = try await session.data(for: req)
-        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        guard (200...299).contains(http.statusCode) else {
-            throw APIError.httpStatus(http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
-        }
-
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
         let dtos = try decoder.decode([TransactionDTO].self, from: data)
         return dtos.compactMap { $0.toModel() }
     }
 
     /// Mark a transaction as resolved. Optionally override the category at
-    /// the same time (used by the post-swipe tagging list). Called from the
-    /// Activity tab on swipe-right and on "Update Changes".
+    /// the same time (used by the post-swipe tagging list).
     func confirmTransaction(id: String, overrideCategory: Category? = nil) async throws {
         struct Body: Encodable {
             let category: String?
             let status: String
         }
-        // category is Optional<String>; Swift's JSONEncoder OMITS nil fields
-        // by default, so omitting the override produces `{"status":"resolved"}`
-        // which leaves the existing category alone.
         let body = Body(category: overrideCategory?.rawValue, status: "resolved")
         try await patchNoContent(path: "/transactions/\(id)", body: body)
     }
@@ -109,7 +96,7 @@ actor APIClient {
     func fetchAwaitingLocationTransactions() async throws -> [AwaitingTransaction] {
         struct Row: Decodable {
             let id: String
-            let occurredAt: String  // ISO 8601 from backend
+            let occurredAt: String
         }
         let rows: [Row] = try await getJSON(path: "/transactions/awaiting")
         let formatter = ISO8601DateFormatter()
@@ -127,13 +114,15 @@ actor APIClient {
         let occurredAt: Date
     }
 
+    // MARK: - Device + location
+
     /// Tell the backend about this device's APNs token so it can send silent pushes.
     func registerDevice(apnsToken: String) async throws {
         struct Body: Encodable { let apnsToken: String }
         try await postNoContent(path: "/devices/register", body: Body(apnsToken: apnsToken))
     }
 
-    /// Upload the captured GPS for a transaction. Called from the silent-push handler.
+    /// Upload the captured GPS for a transaction.
     func uploadLocation(
         transactionId: String,
         latitude: Double,
@@ -151,24 +140,29 @@ actor APIClient {
         )
     }
 
-    // MARK: - Private
+    // MARK: - Internals
 
     private func getJSON<T: Decodable>(path: String) async throws -> T {
-        var req = URLRequest(url: Constants.baseURL.appendingPathComponent(path))
-        req.httpMethod = "GET"
-        req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
-
-        let (data, response) = try await session.data(for: req)
-        guard let http = response as? HTTPURLResponse else {
-            throw APIError.invalidResponse
-        }
-        guard (200...299).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw APIError.httpStatus(http.statusCode, body: body)
-        }
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let url = Constants.baseURL.appendingPathComponent(path)
+        let (data, http) = try await get(url: url, authed: true)
+        try ensure2xx(http: http, data: data)
         return try decoder.decode(T.self, from: data)
+    }
+
+    private func getJSONNoAuth<T: Decodable>(path: String) async throws -> T {
+        let url = Constants.baseURL.appendingPathComponent(path)
+        let (data, http) = try await get(url: url, authed: false)
+        try ensure2xx(http: http, data: data)
+        return try decoder.decode(T.self, from: data)
+    }
+
+    private func get(url: URL, authed: Bool = true) async throws -> (Data, HTTPURLResponse) {
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        if authed {
+            req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
+        }
+        return try await HTTPClient.shared.send(req)
     }
 
     private func patchNoContent<B: Encodable>(path: String, body: B) async throws {
@@ -184,14 +178,13 @@ actor APIClient {
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
-        // Keep snake_case keys to match the backend's expected payload shape
-        // (the encoder converts camelCase -> snake_case automatically).
         req.httpBody = try encoder.encode(body)
 
-        let (data, response) = try await session.data(for: req)
-        guard let http = response as? HTTPURLResponse else {
-            throw APIError.invalidResponse
-        }
+        let (data, http) = try await HTTPClient.shared.send(req)
+        try ensure2xx(http: http, data: data)
+    }
+
+    private func ensure2xx(http: HTTPURLResponse, data: Data) throws {
         guard (200...299).contains(http.statusCode) else {
             let body = String(data: data, encoding: .utf8) ?? ""
             throw APIError.httpStatus(http.statusCode, body: body)
@@ -208,7 +201,7 @@ enum APIError: Error, LocalizedError {
         case .invalidResponse:
             return "Invalid HTTP response from backend"
         case .httpStatus(let code, let body):
-            return "Backend returned \(code): \(body)"
+            return "Server returned \(code): \(body)"
         }
     }
 }
