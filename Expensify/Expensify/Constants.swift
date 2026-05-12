@@ -3,7 +3,9 @@ import Foundation
 /// V1 hardcoded config. Replace before running on a real device.
 /// Eventually these move to a build-config xcconfig (one set for sandbox APNs,
 /// one for production), but for personal-use V1 a single source of truth is fine.
-enum Constants {
+// nonisolated so the APIClient actor (off main) can read these without an
+// async hop. Both values are immutable `let`s — safe to share across actors.
+nonisolated enum Constants {
     /// Railway production URL of the backend.
     static let baseURL: URL = URL(string: "https://expensify-production.up.railway.app")!
 

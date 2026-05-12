@@ -1,10 +1,21 @@
 import Foundation
 import CoreLocation
 
-/// One-shot location fetch wrapped around CLLocationManager. Designed to be
-/// called from the silent-push handler — runs in well under the iOS 30-second
-/// background-fetch window. Hundred-meter accuracy keeps battery cost low and
-/// is plenty for "what city was I in" tagging.
+/// Two responsibilities, one CLLocationManager:
+///
+///   • One-shot fetch (`fetchOnce`) — used by the silent-push handler and by
+///     the foreground backfill. Triggers `requestLocation()`, which is the
+///     lowest-power one-shot option (~10s, hundred-meter accuracy).
+///
+///   • Significant Location Changes monitoring (`startSignificantChangeMonitoring`) —
+///     subscribed once at launch. iOS wakes the app whenever the device moves
+///     ~500m using cell-tower / wifi-cache (no GPS spin-up). Apple guarantees
+///     this works in Low Power Mode. Every wake-up triggers a backfill of any
+///     transactions whose location is still 'awaiting'.
+///
+/// Both flows funnel through one CLLocationManagerDelegate. We disambiguate
+/// by whether there's an active one-shot continuation — if yes, resolve it;
+/// otherwise it's an SLC tick and we fire the backfill task.
 final class LocationService: NSObject, @unchecked Sendable {
     static let shared = LocationService()
 
@@ -12,26 +23,67 @@ final class LocationService: NSObject, @unchecked Sendable {
     private var continuation: CheckedContinuation<CLLocation, Error>?
     private let lock = NSLock()
 
+    /// Most recent SLC reading, persisted across launches so the silent-push
+    /// handler can fall back to it if `requestLocation()` is too slow.
+    var cachedLocation: CLLocation? {
+        guard let data = UserDefaults.standard.data(forKey: Self.cacheKey),
+              let cached = try? JSONDecoder().decode(CachedLocation.self, from: data) else {
+            return nil
+        }
+        return CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: cached.lat, longitude: cached.lng),
+            altitude: 0,
+            horizontalAccuracy: 500,
+            verticalAccuracy: -1,
+            timestamp: cached.timestamp
+        )
+    }
+
+    private static let cacheKey = "expensify.lastKnownLocation"
+
     override init() {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        // Critical: with Background Modes -> Location enabled, iOS will let us
+        // run during SLC wake-ups even when LPM is on.
+        manager.allowsBackgroundLocationUpdates = false  // we don't need continuous
+        manager.pausesLocationUpdatesAutomatically = true
     }
 
     var authorizationStatus: CLAuthorizationStatus { manager.authorizationStatus }
 
-    /// Ask the user for location-while-using permission. Safe to call repeatedly.
-    func requestPermission() {
+    /// Ask for Always permission. iOS will prompt for "When In Use" first
+    /// (you tap Allow While Using) and later upgrade to Always via a follow-up
+    /// prompt or via the Settings nudge. Always is required to receive SLC
+    /// wake-ups in the background, which is the whole point.
+    func requestAlwaysPermission() {
         let status = manager.authorizationStatus
-        if status == .notDetermined {
+        switch status {
+        case .notDetermined:
             manager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse:
+            manager.requestAlwaysAuthorization()
+        default:
+            break
         }
     }
 
-    /// Fetch a single location reading. Throws if permission is denied or the
-    /// system can't get a fix in time. Call this from the silent-push handler.
+    /// Subscribe to significant-location updates. Idempotent — calling
+    /// multiple times is safe; iOS coalesces.
+    func startSignificantChangeMonitoring() {
+        guard CLLocationManager.significantLocationChangeMonitoringAvailable() else {
+            #if DEBUG
+            print("[LocationService] SLC not available on this device")
+            #endif
+            return
+        }
+        manager.startMonitoringSignificantLocationChanges()
+    }
+
+    /// One-shot fetch. Errors if permission is denied or the OS can't get a
+    /// fix in time. Used by silent push + foreground backfill paths.
     func fetchOnce() async throws -> CLLocation {
-        // Guard against concurrent callers — only one outstanding request.
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<CLLocation, Error>) in
             lock.lock()
             if continuation != nil {
@@ -41,15 +93,22 @@ final class LocationService: NSObject, @unchecked Sendable {
             }
             continuation = cont
             lock.unlock()
-
-            // requestLocation() is the single-shot, lowest-power option.
             manager.requestLocation()
         }
     }
 
-    /// Try to turn a CLLocation into a city/locality string. Returns nil if
-    /// the geocoder can't resolve. CLGeocoder is rate-limited by Apple but
-    /// generous for personal use.
+    /// Cached if reasonably fresh, otherwise a one-shot fetch. This is the
+    /// most battery-friendly read for backfill flows — SLC keeps the cache
+    /// warm during normal movement.
+    func bestAvailableLocation(maxAgeSeconds: TimeInterval = 15 * 60) async throws -> CLLocation {
+        if let cached = cachedLocation,
+           cached.timestamp.timeIntervalSinceNow > -maxAgeSeconds {
+            return cached
+        }
+        return try await fetchOnce()
+    }
+
+    /// Try to turn a CLLocation into a city/locality string.
     static func reverseGeocode(_ location: CLLocation) async -> String? {
         let geocoder = CLGeocoder()
         do {
@@ -60,32 +119,85 @@ final class LocationService: NSObject, @unchecked Sendable {
         }
     }
 
-    private func resolve(_ result: Result<CLLocation, Error>) {
+    // MARK: - Private
+
+    private func cache(_ location: CLLocation) {
+        let c = CachedLocation(
+            lat: location.coordinate.latitude,
+            lng: location.coordinate.longitude,
+            timestamp: location.timestamp
+        )
+        if let data = try? JSONEncoder().encode(c) {
+            UserDefaults.standard.set(data, forKey: Self.cacheKey)
+        }
+    }
+
+    private func resolveOneShot(_ result: Result<CLLocation, Error>) {
         lock.lock()
         let cont = continuation
         continuation = nil
         lock.unlock()
         switch result {
-        case .success(let loc):
-            cont?.resume(returning: loc)
-        case .failure(let err):
-            cont?.resume(throwing: err)
+        case .success(let loc): cont?.resume(returning: loc)
+        case .failure(let err): cont?.resume(throwing: err)
         }
     }
 }
 
 extension LocationService: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let loc = locations.last else {
-            resolve(.failure(LocationError.noLocation))
-            return
+        guard let loc = locations.last else { return }
+
+        // Always refresh the cache so subsequent best-available reads are fresh.
+        cache(loc)
+
+        lock.lock()
+        let waitingOneShot = continuation != nil
+        lock.unlock()
+
+        if waitingOneShot {
+            // Resolve the in-flight fetchOnce() call.
+            resolveOneShot(.success(loc))
+        } else {
+            // Background wake from SLC — backfill any awaiting transactions.
+            Task { await BackfillService.shared.backfillAwaiting(using: loc) }
         }
-        resolve(.success(loc))
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        resolve(.failure(error))
+        // Only resolve a one-shot fetch with the error — SLC errors are
+        // typically transient and not worth propagating.
+        lock.lock()
+        let waitingOneShot = continuation != nil
+        lock.unlock()
+        if waitingOneShot {
+            resolveOneShot(.failure(error))
+        } else {
+            #if DEBUG
+            print("[LocationService] SLC delegate error (ignored): \(error)")
+            #endif
+        }
     }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        // When the user grants When-In-Use, follow up by requesting Always so
+        // SLC can run in the background. iOS shows the "Change to Always
+        // Allow?" prompt the next time the app is foregrounded.
+        let status = manager.authorizationStatus
+        if status == .authorizedWhenInUse {
+            manager.requestAlwaysAuthorization()
+        }
+        if status == .authorizedAlways || status == .authorizedWhenInUse {
+            // Safe to start SLC — Apple ignores it if permission isn't right.
+            startSignificantChangeMonitoring()
+        }
+    }
+}
+
+private struct CachedLocation: Codable {
+    let lat: Double
+    let lng: Double
+    let timestamp: Date
 }
 
 enum LocationError: Error, LocalizedError {

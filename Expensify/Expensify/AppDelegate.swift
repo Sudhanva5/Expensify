@@ -1,24 +1,28 @@
 import UIKit
 
 /// Bridge between SwiftUI's @main App struct and UIKit's UIApplicationDelegate.
-/// We need this to receive APNs token + silent-push callbacks; SwiftUI's
-/// scene lifecycle alone doesn't give those.
+/// Owns: APNs token + silent-push callbacks, Significant Location Change
+/// monitoring lifecycle, and the foreground-backfill nudge that catches up
+/// any 'awaiting' transactions when the user opens the app.
 final class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        // Push + location auto-registration is DISABLED for now while we
-        // verify basic backend connectivity. Re-enable once the Push
-        // Notifications + Background Modes capabilities and the
-        // NSLocationWhenInUseUsageDescription privacy string are added in
-        // Xcode. Without those, calling requestPermission() crashes the app.
-        //
-        // Task { @MainActor in
-        //     await PushService.shared.requestPermissionAndRegister()
-        //     LocationService.shared.requestPermission()
-        // }
+        // Ask for notification permission and register for APNs immediately
+        // so silent pushes start arriving as soon as iOS is willing.
+        Task { @MainActor in
+            await PushService.shared.requestPermissionAndRegister()
+
+            // Location: ask for Always so SLC keeps working in the background.
+            // iOS shows "While Using" first; LocationService re-asks for
+            // Always once that's granted (see locationManagerDidChangeAuthorization).
+            LocationService.shared.requestAlwaysPermission()
+            // Safe to call — iOS no-ops if permission isn't granted yet, and
+            // the delegate re-calls this once Always is approved.
+            LocationService.shared.startSignificantChangeMonitoring()
+        }
         return true
     }
 
@@ -40,8 +44,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         #endif
     }
 
-    /// Silent-push entrypoint. iOS gives us ~30 seconds of background time
-    /// to do everything: fetch location, hit the backend, return.
+    /// Silent-push entrypoint. iOS gives us ~30 seconds in the background to
+    /// fetch location, hit the backend, return.
     func application(
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
@@ -50,6 +54,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         Task {
             let result = await PushService.shared.handleSilentPush(userInfo: userInfo)
             completionHandler(result)
+        }
+    }
+
+    /// Every time the app foregrounds — runs the foreground backfill so any
+    /// transactions stuck in 'awaiting' (because LPM, force-quit, or APNs
+    /// throttling killed the silent push) get caught up.
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        Task {
+            await BackfillService.shared.backfillFromForeground()
         }
     }
 }

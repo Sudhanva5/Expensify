@@ -78,6 +78,17 @@ export async function sendLocationRequestPush(args: LocationRequestPushArgs): Pr
     const result = await p.send(note, args.apnsToken);
     if (result.failed.length > 0) {
       console.error('[APNs] failed:', JSON.stringify(result.failed));
+      // If Apple says the token is dead, drop it from the DB so we don't
+      // keep trying to push to a ghost.
+      for (const failed of result.failed) {
+        const reason = failed.response?.reason;
+        if (reason === 'BadDeviceToken' || reason === 'Unregistered') {
+          await prisma.deviceToken
+            .deleteMany({ where: { apnsToken: args.apnsToken } })
+            .catch((err) => console.error('[APNs] failed to prune dead token:', err));
+          console.log('[APNs] pruned dead token:', args.apnsToken.slice(0, 16));
+        }
+      }
       return false;
     }
     return true;

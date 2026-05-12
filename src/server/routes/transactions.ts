@@ -22,6 +22,34 @@ interface IdParams {
 }
 
 export async function transactionsRoute(app: FastifyInstance): Promise<void> {
+  // Cheap auth-only check used by the iOS "Test connection" button. Returns
+  // 200 if the Bearer token is valid. Doesn't touch any tables.
+  app.get(
+    '/auth/check',
+    { preHandler: requireApiToken },
+    async () => ({ ok: true }),
+  );
+
+  // IDs of transactions still waiting for a location upload. iOS polls this
+  // when it wakes via Significant Location Changes (or when it foregrounds)
+  // and backfills each row with the device's current best-known location.
+  app.get(
+    '/awaiting',
+    { preHandler: requireApiToken },
+    async () => {
+      const rows = await prisma.transaction.findMany({
+        where: { locationStatus: 'awaiting' },
+        select: { id: true, occurredAt: true },
+        orderBy: { occurredAt: 'desc' },
+        take: 50,
+      });
+      return rows.map((r) => ({
+        id: r.id,
+        occurred_at: r.occurredAt.toISOString(),
+      }));
+    },
+  );
+
   // List recent transactions for the iOS app. Newest first. Includes the
   // resolved category name so the client doesn't have to do a second join.
   app.get(
