@@ -3,15 +3,20 @@ import Contacts
 import Observation
 
 /// Local-only contact matcher. Reads the user's Contacts on demand, builds
-/// an index of "normalized name" → contact, and answers two questions for
-/// the rest of the app:
+/// an index of "normalized phone number" → contact, and answers one
+/// question for the rest of the app:
 ///
-///   1. `match(for transaction:)` → does this transaction's payee map to
-///      a contact in your phone? Used to overlay the contact's display
-///      name (and later, their photo) onto the row.
-///   2. `shouldClassifyAsP2P(transaction:)` → if there's a contact match,
-///      this is almost certainly a personal transfer regardless of what
-///      the backend's tier chain said. Used to force-tag at display time.
+///   `match(for transaction:)` — was this UPI transaction sent to a phone
+///   number that lives in your address book? When the VPA carries an
+///   embedded phone (`9876543210@ybl`) and that phone matches a contact,
+///   the iOS app overlays the contact's display name + photo onto the
+///   row AND force-tags the category as P2P.
+///
+/// Matching is **strictly by phone number** — name matching was disabled
+/// after producing false positives (e.g. "Sneha Bubbly" matching "Sneha
+/// Appa" because they share a given name). VPAs whose local-part is a
+/// handle (`sneha.r@oksbi`) don't yield a match here; those land in the
+/// review queue or default merchant pipeline instead.
 ///
 /// Privacy:
 ///   • Contacts NEVER leave the device. No network calls. No sync.
@@ -40,15 +45,15 @@ final class ContactsService {
     var authorization: Authorization = .notDetermined
     var lastError: String? = nil
 
-    /// Normalized first-token → list of contacts whose name starts with
-    /// that token. Index is rebuilt on each refresh().
-    /// Why first-token: bank emails almost always render UPI payee names
-    /// as "FIRSTNAME LASTNAME" (e.g. "RAJESH KUMAR"). Matching by the
-    /// first word is the cheapest, most accurate heuristic short of fuzzy
-    /// name resolution.
-    private var indexByFirstToken: [String: [Contact]] = [:]
+    /// Normalized last-10-digit phone → list of contacts that have that
+    /// number. Phone is the only field that's actually unique — name
+    /// matching gave us false positives ("Sneha Bubbly" matching to
+    /// "Sneha Appa" because both start with "Sneha"). UPI VPAs often
+    /// embed the phone number in the local part (e.g. `9876543210@ybl`),
+    /// so when we can extract a phone from the VPA we lookup here.
+    private var indexByPhone: [String: [Contact]] = [:]
 
-    /// Full list — kept so we can support "any token" fallback matching.
+    /// Full list — used for diagnostics and the count, not for matching.
     private var allContacts: [Contact] = []
 
     struct Contact: Hashable {
@@ -137,85 +142,87 @@ final class ContactsService {
             await MainActor.run {
                 self.allContacts = fetched
                 self.cnContactsById = cnById
-                self.indexByFirstToken = Self.buildIndex(from: fetched)
+                self.indexByPhone = Self.buildPhoneIndex(from: fetched)
             }
         }.value
     }
 
-    private static func buildIndex(from contacts: [Contact]) -> [String: [Contact]] {
+    /// Build a phone → contacts index. Each phone number is normalized
+    /// to its last 10 digits so that "+91 98765 43210" and "9876543210"
+    /// collapse to the same key. A contact with multiple phone numbers
+    /// (work + personal) appears under each of its normalized keys.
+    private static func buildPhoneIndex(from contacts: [Contact]) -> [String: [Contact]] {
         var out: [String: [Contact]] = [:]
         for c in contacts {
-            let token = Self.normalize(c.givenName.isEmpty ? c.displayName : c.givenName)
-                .split(separator: " ")
-                .first
-                .map(String.init) ?? ""
-            guard !token.isEmpty else { continue }
-            out[token, default: []].append(c)
+            for raw in c.phoneNumbers {
+                guard let key = Self.normalizePhone(raw) else { continue }
+                out[key, default: []].append(c)
+            }
         }
         return out
     }
 
+    /// Reduce a phone number string to its canonical last-10-digit form.
+    /// Returns nil for strings with fewer than 10 digits (probably a
+    /// landline / short code that won't match a VPA anyway).
+    static func normalizePhone(_ raw: String) -> String? {
+        let digits = raw.unicodeScalars
+            .filter { CharacterSet.decimalDigits.contains($0) }
+            .map(String.init)
+            .joined()
+        guard digits.count >= 10 else { return nil }
+        return String(digits.suffix(10))
+    }
+
+    /// Try to extract a 10-digit phone number from a UPI VPA's local part.
+    /// Returns nil when the local part isn't a phone (e.g. `sneha.r@oksbi`
+    /// where the user-handle is a name, not a number).
+    ///
+    /// Examples that match:
+    ///   - `9876543210@ybl`     → `9876543210`
+    ///   - `919876543210@paytm` → `9876543210`
+    ///   - `+919876543210@upi`  → `9876543210`
+    /// Examples that don't:
+    ///   - `sneha.r@oksbi`      → nil
+    ///   - `bob.smith@axl`      → nil
+    static func phoneFromVpa(_ vpa: String) -> String? {
+        guard let atIndex = vpa.firstIndex(of: "@") else { return nil }
+        let local = String(vpa[..<atIndex])
+        // Allow an optional leading `+` and otherwise only digits.
+        // Pattern: `^\+?\d{10,12}$`
+        let isPhoneShaped = local.range(of: #"^\+?\d{10,12}$"#, options: .regularExpression) != nil
+        guard isPhoneShaped else { return nil }
+        return normalizePhone(local)
+    }
+
     // MARK: - Matching
 
-    /// Returns the best-matching contact for a transaction's payee, or nil.
+    /// Returns the contact a transaction was sent to, matched by **phone
+    /// number embedded in the VPA**. Phone is the only truly unique field;
+    /// name-based matching gave us false positives like "Sneha Bubbly"
+    /// matching to "Sneha Appa" because they share a given name.
     ///
-    /// Match priority:
-    ///   1. First-token match: "RAJESH KUMAR" → contact with first name "Rajesh"
-    ///   2. Substring match on full display name (covers nicknames /
-    ///      single-name contacts like "Sneha")
+    /// Only matches when:
+    ///   - direction = out (it's an outbound payment)
+    ///   - instrument starts with "account_" (UPI from your bank, not card)
+    ///   - the VPA's local part parses as a 10-digit phone number
+    ///   - some contact in the address book has that same number
     ///
-    /// Only matches when the transaction is BOTH outbound AND uses the
-    /// account-instrument (UPI from your bank account) — credit-card
-    /// transactions to "RAJESH KUMAR" are restaurant tips, not P2P.
+    /// Returns nil for transactions whose VPA local-part is a name handle
+    /// (`sneha.r@oksbi`, `bob.smith@axl`). Those land in the review queue
+    /// or default merchant pipeline — no risky fuzzy-name match.
     func match(for transaction: Transaction) -> Contact? {
         guard transaction.direction == .out else { return nil }
         guard transaction.instrument.hasPrefix("account_") else { return nil }
-        guard !indexByFirstToken.isEmpty else { return nil }
-
-        let payee = transaction.merchantRaw
-        let normalized = Self.normalize(payee)
-        let firstToken = normalized.split(separator: " ").first.map(String.init) ?? ""
-
-        // Index hit on first token — narrow to a small set, pick best.
-        if !firstToken.isEmpty, let candidates = indexByFirstToken[firstToken] {
-            if candidates.count == 1 { return candidates[0] }
-            // Multiple "Rajesh"es in contacts. Try to disambiguate by also
-            // matching the family name token from the payee against any
-            // contact's family name.
-            let payeeTokens = Set(normalized.split(separator: " ").map(String.init))
-            for c in candidates {
-                let family = Self.normalize(c.familyName)
-                if !family.isEmpty, payeeTokens.contains(family) {
-                    return c
-                }
-            }
-            return candidates[0]
+        guard let vpa = transaction.vpa, !vpa.isEmpty else { return nil }
+        guard let phone = Self.phoneFromVpa(vpa) else { return nil }
+        guard let candidates = indexByPhone[phone], !candidates.isEmpty else {
+            return nil
         }
-
-        // Fallback: substring match anywhere.
-        for c in allContacts {
-            let nd = Self.normalize(c.displayName)
-            if !nd.isEmpty, normalized.contains(nd) || nd.contains(normalized) {
-                return c
-            }
-        }
-        return nil
-    }
-
-    /// Should we client-side override this transaction's category to P2P?
-    /// True iff there's a contact match AND the existing category isn't
-    /// already a more-confident merchant signal (alias / autopay).
-    func shouldClassifyAsP2P(_ transaction: Transaction) -> Bool {
-        guard match(for: transaction) != nil else { return false }
-        // Don't override known merchants — if our backend already auto-
-        // tagged via alias (e.g. "BUNDL TECHNOLOGIES" → Swiggy), trust
-        // that over a contact name collision.
-        switch transaction.signalSource {
-        case .alias, .autopayAlias, .merchantPattern, .places:
-            return false
-        default:
-            return true
-        }
+        // Phone numbers are unique — there should only ever be one contact
+        // per number. If duplicates exist, take the first; the user can
+        // clean up their address book.
+        return candidates[0]
     }
 
     /// Get the contact's photo data. Loads from the CNContact on first
@@ -240,20 +247,4 @@ final class ContactsService {
         return nil
     }
 
-    // MARK: - Normalization
-
-    /// Strip punctuation, collapse whitespace, lowercase. Used as the
-    /// canonical comparison form for names.
-    private static func normalize(_ s: String) -> String {
-        let kept = s.unicodeScalars.map { scalar -> Character in
-            if CharacterSet.letters.contains(scalar) || scalar == " " {
-                return Character(scalar)
-            }
-            return " "
-        }
-        let collapsed = String(kept)
-            .split(separator: " ", omittingEmptySubsequences: true)
-            .joined(separator: " ")
-        return collapsed.lowercased()
-    }
 }

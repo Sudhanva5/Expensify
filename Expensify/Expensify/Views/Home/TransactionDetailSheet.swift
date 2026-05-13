@@ -41,27 +41,11 @@ struct TransactionDetailSheet: View {
         return transaction.displayMerchant
     }
 
-    /// Small line above the title — shows what the bank/UPI knew about
-    /// this payee. Falls back to "—" when there's no VPA-level data.
-    private var subtitle: String {
-        if let contactName, !contactName.isEmpty {
-            return contactName
-        }
-        if !transaction.merchantRaw.isEmpty,
-           transaction.merchantRaw.caseInsensitiveCompare(primaryTitle) != .orderedSame {
-            return transaction.merchantRaw
-        }
-        if let vpa = transaction.vpa, !vpa.isEmpty {
-            return vpa
-        }
-        return ""
-    }
-
     /// Content-sized height per Apple HIG ("Sheets") — the sheet should be
-    /// just big enough for its contents, no taller. Adds 14pts for the new
-    /// attribution caption ("probable nearby place" / "from your contacts").
+    /// just big enough for its contents, no taller. We dropped the VPA
+    /// subtitle row (~16pts), so the totals come back down a notch.
     private var sheetHeight: CGFloat {
-        hasMap ? 400 : 160
+        hasMap ? 380 : 140
     }
 
     var body: some View {
@@ -95,22 +79,17 @@ struct TransactionDetailSheet: View {
             )
 
             VStack(alignment: .leading, spacing: 3) {
-                // Small "where this name came from" caption. For Places-
-                // resolved rows it says "probable nearby place" so the user
-                // knows the headline name is a guess, not a hard fact from
-                // the bank. For contact-overlaid rows it shows the raw
-                // payee, so the underlying transaction context isn't lost.
+                // Small attribution caption — tells the user where the
+                // headline name comes from. For Places-resolved rows it
+                // says "probable nearby place"; for contact rows it says
+                // "from your contacts". Title below is the only name we
+                // show — no VPA / merchantRaw subtitle, intentionally,
+                // since duplicating the bank's cryptic payee right under
+                // a probable-place name was confusing.
                 if !attributionLabel.isEmpty {
                     Text(attributionLabel)
                         .font(.system(size: 10, weight: .semibold).smallCaps())
                         .foregroundStyle(AppColor.textTertiary)
-                }
-                if !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(AppColor.textTertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
                 }
                 Text(primaryTitle)
                     .font(.system(size: 20, weight: .semibold))

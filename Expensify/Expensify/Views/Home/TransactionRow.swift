@@ -86,34 +86,19 @@ struct TransactionRow: View {
                 .font(.system(size: 13))
                 .foregroundStyle(AppColor.textSecondary)
 
-            // Location chip: ONLY when we have a Places-resolved name AND
-            // it's not a contact-matched P2P (where "MTR Hotel" near the
-            // friend's tea-shop would be a misleading match).
-            if !isContactOverride, transaction.hasResolvedMerchant {
-                Button(action: { showDetailSheet = true }) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "mappin.and.ellipse")
-                            .font(.system(size: 9, weight: .medium))
-                        Text(locationChipText)
-                            .font(.system(size: 12, weight: .medium))
-                            .lineLimit(1)
-                    }
-                    .foregroundStyle(AppColor.tap)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(AppColor.tap.opacity(0.08))
-                    .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-
-            // ⓘ button: still surfaced even on contact rows so the user can
-            // peek the underlying VPA / time / map if they're curious.
+            // "more details" chip — opens the bottom sheet with the map +
+            // probable-place name. Replaced the inline location chip + the
+            // bare ⓘ glyph; a labeled chip is more discoverable than a
+            // single icon and clearer about what tapping will do.
             if shouldShowInfo {
                 Button(action: { showDetailSheet = true }) {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(AppColor.textTertiary)
+                    Text("more details")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(AppColor.tap)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(AppColor.tap.opacity(0.08))
+                        .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Show transaction details")
@@ -158,23 +143,9 @@ struct TransactionRow: View {
         return cn
     }
 
-    /// What goes inside the location chip. Prefer the resolved business
-    /// name; fall back to city or coordinates.
-    private var locationChipText: String {
-        if transaction.hasResolvedMerchant {
-            return transaction.merchantNormalized
-        }
-        if let city = transaction.locationCity, !city.isEmpty {
-            return city.lowercased()
-        }
-        if transaction.hasCoordinates {
-            return "location"
-        }
-        return ""
-    }
-
-    /// Show the ⓘ when the sheet would actually have something useful in
-    /// it — either a resolved business name or coords for the map.
+    /// Show the "more details" chip when the sheet would actually have
+    /// something useful in it — either a resolved business name (probable
+    /// nearby place) or coordinates for the map preview.
     private var shouldShowInfo: Bool {
         transaction.hasResolvedMerchant || transaction.hasCoordinates
     }
