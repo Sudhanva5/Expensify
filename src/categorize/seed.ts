@@ -3,44 +3,153 @@
 
 import type { AliasEntry, AutopayAliasEntry } from './types.js';
 
-export const ROUTING_PREFIXES: string[] = ['RAZ*', 'PAYU*', 'CCD*', 'BLLG*', 'BBPS*'];
+// Payment-aggregator prefixes commonly seen at the start of HDFC merchant
+// strings (e.g. "RAZ*BUNDL TECHNOLOGIES" → strip "RAZ*" → "BUNDL TECHNOLOGIES").
+// The presence of any of these is also a hint that the transaction is online —
+// see src/categorize/onlineMerchant.ts for the corresponding detector.
+export const ROUTING_PREFIXES: string[] = [
+  'RAZ*',
+  'PAYU*',
+  'CCD*',
+  'BLLG*',
+  'BBPS*',
+  'STRIPE*',
+  'PAYPAL*',
+  'GPAY*',
+  'PAYTM*',
+  'SQ*',
+];
 
 export const SEED_ALIASES: AliasEntry[] = [
-  // Food
+  // ---- Food --------------------------------------------------------------
   { pattern: 'BUNDL TECHNOLOGIES', matchType: 'exact', canonical: 'Swiggy', category: 'Food' },
   { pattern: 'Swiggy', matchType: 'substring', canonical: 'Swiggy', category: 'Food' },
   { pattern: 'Zomato', matchType: 'substring', canonical: 'Zomato', category: 'Food' },
   { pattern: 'EatFit', matchType: 'substring', canonical: 'EatFit', category: 'Food' },
+  { pattern: 'CULT.FIT', matchType: 'substring', canonical: 'Cult.fit', category: 'Food' },
+  { pattern: 'CULTFIT', matchType: 'substring', canonical: 'Cult.fit', category: 'Food' },
 
-  // Travel
+  // ---- Travel ------------------------------------------------------------
   { pattern: 'ANI TECHNOLOGIES', matchType: 'exact', canonical: 'Ola', category: 'Travel' },
   { pattern: 'Ola', matchType: 'substring', canonical: 'Ola', category: 'Travel' },
   { pattern: 'UBER', matchType: 'substring', canonical: 'Uber', category: 'Travel' },
+  { pattern: 'RAPIDO', matchType: 'substring', canonical: 'Rapido', category: 'Travel' },
   { pattern: 'IRCTC', matchType: 'substring', canonical: 'IRCTC', category: 'Travel' },
   { pattern: 'INDIGO', matchType: 'substring', canonical: 'IndiGo', category: 'Travel' },
   { pattern: 'AKASA', matchType: 'substring', canonical: 'Akasa Air', category: 'Travel' },
+  { pattern: 'VISTARA', matchType: 'substring', canonical: 'Vistara', category: 'Travel' },
+  { pattern: 'SPICEJET', matchType: 'substring', canonical: 'SpiceJet', category: 'Travel' },
+  { pattern: 'AIRINDIA', matchType: 'substring', canonical: 'Air India', category: 'Travel' },
+  { pattern: 'MAKEMYTRIP', matchType: 'substring', canonical: 'MakeMyTrip', category: 'Travel' },
+  { pattern: 'GOIBIBO', matchType: 'substring', canonical: 'Goibibo', category: 'Travel' },
+  { pattern: 'CLEARTRIP', matchType: 'substring', canonical: 'Cleartrip', category: 'Travel' },
+  { pattern: 'EASEMYTRIP', matchType: 'substring', canonical: 'EaseMyTrip', category: 'Travel' },
+  { pattern: 'AIRBNB', matchType: 'substring', canonical: 'Airbnb', category: 'Travel' },
+  { pattern: 'OYO', matchType: 'substring', canonical: 'OYO', category: 'Travel' },
 
-  // Subscriptions
-  { pattern: 'NETFLIX', matchType: 'substring', canonical: 'Netflix', category: 'Subscriptions' },
-  { pattern: 'SPOTIFY', matchType: 'substring', canonical: 'Spotify', category: 'Subscriptions' },
-  { pattern: 'CLAUDE', matchType: 'substring', canonical: 'Claude', category: 'Subscriptions' },
+  // ---- Subscriptions: AI / Dev tools ------------------------------------
   { pattern: 'ANTHROPIC', matchType: 'substring', canonical: 'Anthropic', category: 'Subscriptions' },
+  { pattern: 'CLAUDE', matchType: 'substring', canonical: 'Claude', category: 'Subscriptions' },
   { pattern: 'OPENAI', matchType: 'substring', canonical: 'OpenAI', category: 'Subscriptions' },
   { pattern: 'CHATGPT', matchType: 'substring', canonical: 'ChatGPT', category: 'Subscriptions' },
-  { pattern: 'YOUTUBE', matchType: 'substring', canonical: 'YouTube', category: 'Subscriptions' },
   { pattern: 'CURSOR', matchType: 'substring', canonical: 'Cursor', category: 'Subscriptions' },
+  { pattern: 'PERPLEXITY', matchType: 'substring', canonical: 'Perplexity', category: 'Subscriptions' },
+  { pattern: 'GEMINI', matchType: 'substring', canonical: 'Google Gemini', category: 'Subscriptions' },
   { pattern: 'GITHUB', matchType: 'substring', canonical: 'GitHub', category: 'Subscriptions' },
+  { pattern: 'GITLAB', matchType: 'substring', canonical: 'GitLab', category: 'Subscriptions' },
+  { pattern: 'FIGMA', matchType: 'substring', canonical: 'Figma', category: 'Subscriptions' },
+  { pattern: 'NOTION', matchType: 'substring', canonical: 'Notion', category: 'Subscriptions' },
+  { pattern: 'LINEAR', matchType: 'substring', canonical: 'Linear', category: 'Subscriptions' },
+  { pattern: 'SLACK', matchType: 'substring', canonical: 'Slack', category: 'Subscriptions' },
+  { pattern: 'ZOOM', matchType: 'substring', canonical: 'Zoom', category: 'Subscriptions' },
+  { pattern: 'DROPBOX', matchType: 'substring', canonical: 'Dropbox', category: 'Subscriptions' },
+  { pattern: 'VERCEL', matchType: 'substring', canonical: 'Vercel', category: 'Subscriptions' },
+  { pattern: 'RAILWAY', matchType: 'substring', canonical: 'Railway', category: 'Subscriptions' },
+  { pattern: 'HEROKU', matchType: 'substring', canonical: 'Heroku', category: 'Subscriptions' },
+  { pattern: 'RENDER', matchType: 'substring', canonical: 'Render', category: 'Subscriptions' },
+  { pattern: 'CLOUDFLARE', matchType: 'substring', canonical: 'Cloudflare', category: 'Subscriptions' },
+  { pattern: 'CLOUDFLR', matchType: 'substring', canonical: 'Cloudflare', category: 'Subscriptions' },
+  { pattern: 'NAME-CHEAP', matchType: 'substring', canonical: 'Namecheap', category: 'Subscriptions' },
+  { pattern: 'NAMECHEAP', matchType: 'substring', canonical: 'Namecheap', category: 'Subscriptions' },
+  { pattern: 'GODADDY', matchType: 'substring', canonical: 'GoDaddy', category: 'Subscriptions' },
+  { pattern: 'GOOGLE CLOUD', matchType: 'substring', canonical: 'Google Cloud', category: 'Subscriptions' },
+  { pattern: 'GCP', matchType: 'substring', canonical: 'Google Cloud', category: 'Subscriptions' },
+  { pattern: 'GOOGLE WORKSPACE', matchType: 'substring', canonical: 'Google Workspace', category: 'Subscriptions' },
+  { pattern: 'GSUITE', matchType: 'substring', canonical: 'Google Workspace', category: 'Subscriptions' },
+  { pattern: 'GOOGLE ONE', matchType: 'substring', canonical: 'Google One', category: 'Subscriptions' },
+  { pattern: 'AWS', matchType: 'substring', canonical: 'AWS', category: 'Subscriptions' },
+  { pattern: 'AMAZON WEB SERVICES', matchType: 'substring', canonical: 'AWS', category: 'Subscriptions' },
+  { pattern: 'MICROSOFT', matchType: 'substring', canonical: 'Microsoft', category: 'Subscriptions' },
+  { pattern: 'OFFICE 365', matchType: 'substring', canonical: 'Microsoft 365', category: 'Subscriptions' },
+  { pattern: 'M365', matchType: 'substring', canonical: 'Microsoft 365', category: 'Subscriptions' },
+  { pattern: 'MS365', matchType: 'substring', canonical: 'Microsoft 365', category: 'Subscriptions' },
+  { pattern: 'AZURE', matchType: 'substring', canonical: 'Azure', category: 'Subscriptions' },
+  { pattern: 'ADOBE', matchType: 'substring', canonical: 'Adobe', category: 'Subscriptions' },
+  { pattern: 'CANVA', matchType: 'substring', canonical: 'Canva', category: 'Subscriptions' },
+  { pattern: 'GRAMMARLY', matchType: 'substring', canonical: 'Grammarly', category: 'Subscriptions' },
+  { pattern: '1PASSWORD', matchType: 'substring', canonical: '1Password', category: 'Subscriptions' },
+  { pattern: 'BITWARDEN', matchType: 'substring', canonical: 'Bitwarden', category: 'Subscriptions' },
+  { pattern: 'PROTON', matchType: 'substring', canonical: 'Proton', category: 'Subscriptions' },
 
-  // Entertainment
+  // ---- Subscriptions: streaming -----------------------------------------
+  { pattern: 'NETFLIX', matchType: 'substring', canonical: 'Netflix', category: 'Subscriptions' },
+  { pattern: 'SPOTIFY', matchType: 'substring', canonical: 'Spotify', category: 'Subscriptions' },
+  { pattern: 'YOUTUBE', matchType: 'substring', canonical: 'YouTube', category: 'Subscriptions' },
+  { pattern: 'YT PREMIUM', matchType: 'substring', canonical: 'YouTube Premium', category: 'Subscriptions' },
+  { pattern: 'YOUTUBE PREMIUM', matchType: 'substring', canonical: 'YouTube Premium', category: 'Subscriptions' },
+  { pattern: 'DISNEY', matchType: 'substring', canonical: 'Disney+', category: 'Subscriptions' },
+  { pattern: 'HOTSTAR', matchType: 'substring', canonical: 'Hotstar', category: 'Subscriptions' },
+  { pattern: 'JIOHOTSTAR', matchType: 'substring', canonical: 'JioHotstar', category: 'Subscriptions' },
+  { pattern: 'JIO HOTSTAR', matchType: 'substring', canonical: 'JioHotstar', category: 'Subscriptions' },
+  { pattern: 'SONYLIV', matchType: 'substring', canonical: 'SonyLIV', category: 'Subscriptions' },
+  { pattern: 'SONY LIV', matchType: 'substring', canonical: 'SonyLIV', category: 'Subscriptions' },
+  { pattern: 'ZEE5', matchType: 'substring', canonical: 'ZEE5', category: 'Subscriptions' },
+  { pattern: 'VOOT', matchType: 'substring', canonical: 'Voot', category: 'Subscriptions' },
+  { pattern: 'PRIME VIDEO', matchType: 'substring', canonical: 'Prime Video', category: 'Subscriptions' },
+  { pattern: 'AMAZON PRIME', matchType: 'substring', canonical: 'Amazon Prime', category: 'Subscriptions' },
+  { pattern: 'APPLE.COM/BILL', matchType: 'substring', canonical: 'Apple', category: 'Subscriptions' },
+  { pattern: 'APPLE TV', matchType: 'substring', canonical: 'Apple TV+', category: 'Subscriptions' },
+  { pattern: 'ICLOUD', matchType: 'substring', canonical: 'iCloud', category: 'Subscriptions' },
+  { pattern: 'APPLE ONE', matchType: 'substring', canonical: 'Apple One', category: 'Subscriptions' },
+  { pattern: 'TIMES PRIME', matchType: 'substring', canonical: 'Times Prime', category: 'Subscriptions' },
+
+  // ---- Subscriptions: telecom / fiber -----------------------------------
+  { pattern: 'JIO FIBER', matchType: 'substring', canonical: 'JioFiber', category: 'Subscriptions' },
+  { pattern: 'JIOFIBER', matchType: 'substring', canonical: 'JioFiber', category: 'Subscriptions' },
+  { pattern: 'AIRTEL XSTREAM', matchType: 'substring', canonical: 'Airtel Xstream', category: 'Subscriptions' },
+  { pattern: 'ACT FIBERNET', matchType: 'substring', canonical: 'ACT Fibernet', category: 'Subscriptions' },
+  { pattern: 'TATA PLAY', matchType: 'substring', canonical: 'Tata Play', category: 'Subscriptions' },
+  { pattern: 'TATA SKY', matchType: 'substring', canonical: 'Tata Play', category: 'Subscriptions' },
+
+  // ---- Entertainment ----------------------------------------------------
   { pattern: 'BOOKMYSHOW', matchType: 'substring', canonical: 'BookMyShow', category: 'Entertainment' },
   { pattern: 'PVR', matchType: 'substring', canonical: 'PVR', category: 'Entertainment' },
   { pattern: 'INOX', matchType: 'substring', canonical: 'INOX', category: 'Entertainment' },
+  { pattern: 'STEAM', matchType: 'substring', canonical: 'Steam', category: 'Entertainment' },
+  { pattern: 'EPIC GAMES', matchType: 'substring', canonical: 'Epic Games', category: 'Entertainment' },
+  { pattern: 'PLAYSTATION', matchType: 'substring', canonical: 'PlayStation', category: 'Entertainment' },
+  { pattern: 'XBOX', matchType: 'substring', canonical: 'Xbox', category: 'Entertainment' },
+  { pattern: 'NINTENDO', matchType: 'substring', canonical: 'Nintendo', category: 'Entertainment' },
 
-  // Groceries
+  // ---- Groceries --------------------------------------------------------
   { pattern: 'BIGBASKET', matchType: 'substring', canonical: 'BigBasket', category: 'Groceries / Kirana Stores' },
   { pattern: 'BLINKIT', matchType: 'substring', canonical: 'Blinkit', category: 'Groceries / Kirana Stores' },
   { pattern: 'ZEPTO', matchType: 'substring', canonical: 'Zepto', category: 'Groceries / Kirana Stores' },
   { pattern: 'INSTAMART', matchType: 'substring', canonical: 'Swiggy Instamart', category: 'Groceries / Kirana Stores' },
+  { pattern: 'DUNZO', matchType: 'substring', canonical: 'Dunzo', category: 'Groceries / Kirana Stores' },
+  { pattern: 'DMART', matchType: 'substring', canonical: 'DMart', category: 'Groceries / Kirana Stores' },
+  { pattern: 'RELIANCE FRESH', matchType: 'substring', canonical: 'Reliance Fresh', category: 'Groceries / Kirana Stores' },
+
+  // ---- Investments ------------------------------------------------------
+  { pattern: 'ZERODHA', matchType: 'substring', canonical: 'Zerodha', category: 'Investments' },
+  { pattern: 'GROWW', matchType: 'substring', canonical: 'Groww', category: 'Investments' },
+  { pattern: 'UPSTOX', matchType: 'substring', canonical: 'Upstox', category: 'Investments' },
+  { pattern: 'ANGELONE', matchType: 'substring', canonical: 'Angel One', category: 'Investments' },
+  { pattern: 'ANGEL ONE', matchType: 'substring', canonical: 'Angel One', category: 'Investments' },
+  { pattern: 'KUVERA', matchType: 'substring', canonical: 'Kuvera', category: 'Investments' },
+  { pattern: 'COINDCX', matchType: 'substring', canonical: 'CoinDCX', category: 'Investments' },
+  { pattern: 'WAZIRX', matchType: 'substring', canonical: 'WazirX', category: 'Investments' },
+  { pattern: 'COINBASE', matchType: 'substring', canonical: 'Coinbase', category: 'Investments' },
 ];
 
 export const SEED_AUTOPAY_ALIASES: AutopayAliasEntry[] = [
@@ -54,4 +163,13 @@ export const SEED_AUTOPAY_ALIASES: AutopayAliasEntry[] = [
   { pattern: 'Spotify', matchType: 'substring', category: 'Subscriptions' },
   { pattern: 'YouTube', matchType: 'substring', category: 'Subscriptions' },
   { pattern: 'Cursor', matchType: 'substring', category: 'Subscriptions' },
+  { pattern: 'Cloudflare', matchType: 'substring', category: 'Subscriptions' },
+  { pattern: 'Namecheap', matchType: 'substring', category: 'Subscriptions' },
+  { pattern: 'GoDaddy', matchType: 'substring', category: 'Subscriptions' },
+  { pattern: 'AWS', matchType: 'substring', category: 'Subscriptions' },
+  { pattern: 'Google Cloud', matchType: 'substring', category: 'Subscriptions' },
+  { pattern: 'Hotstar', matchType: 'substring', category: 'Subscriptions' },
+  { pattern: 'JioFiber', matchType: 'substring', category: 'Subscriptions' },
+  { pattern: 'Airtel Xstream', matchType: 'substring', category: 'Subscriptions' },
+  { pattern: 'Tata Play', matchType: 'substring', category: 'Subscriptions' },
 ];

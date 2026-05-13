@@ -14,13 +14,31 @@ struct MerchantAvatar: View {
     /// favicons + initials — the user's friend's actual DP fills the
     /// circle. Sourced from `ContactsService.imageData(for:)`.
     var contactImageData: Data? = nil
+    /// Optional contact display name. When supplied AND no photo is
+    /// available, initials are derived from THIS name instead of
+    /// `merchantName`, so a row that visually says "Sneha Appa" doesn't
+    /// show the avatar initials "SR" from the underlying merchantRaw.
+    var contactName: String? = nil
+    /// Optional category fallback. When supplied AND there's no contact
+    /// photo and no recognized favicon, the category's SF Symbol fills
+    /// the circle instead of plain initials. More informative for rows
+    /// where we don't have a brand mark (Places-resolved restaurants,
+    /// random kirana stores) — the user immediately sees a fork-and-knife
+    /// for food, a basket for groceries, etc.
+    var categoryFallback: Category? = nil
 
     private var faviconURL: URL? {
-        MerchantBranding.faviconURL(for: merchantName, size: 128)
+        // When a contact name is supplied, the avatar is representing a
+        // person, not a merchant — no favicon lookup.
+        if let contactName, !contactName.isEmpty { return nil }
+        return MerchantBranding.faviconURL(for: merchantName, size: 128)
     }
 
     private var initials: String {
-        MerchantBranding.initials(for: merchantName)
+        if let contactName, !contactName.isEmpty {
+            return MerchantBranding.initials(for: contactName)
+        }
+        return MerchantBranding.initials(for: merchantName)
     }
 
     var body: some View {
@@ -48,14 +66,28 @@ struct MerchantAvatar: View {
                             .frame(width: size * 0.58, height: size * 0.58)
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     case .failure, .empty:
-                        initialsView
+                        fallbackView
                     @unknown default:
-                        initialsView
+                        fallbackView
                     }
                 }
             } else {
-                initialsView
+                fallbackView
             }
+        }
+    }
+
+    /// What to render when neither a contact photo nor a favicon is
+    /// available. Prefers the category icon (more informative) over
+    /// initials when a categoryFallback was supplied.
+    @ViewBuilder
+    private var fallbackView: some View {
+        if let categoryFallback {
+            Image(systemName: categoryFallback.symbolName)
+                .font(.system(size: size * 0.42, weight: .semibold))
+                .foregroundStyle(AppColor.textPrimary.opacity(0.78))
+        } else {
+            initialsView
         }
     }
 

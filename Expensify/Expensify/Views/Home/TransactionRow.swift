@@ -36,7 +36,13 @@ struct TransactionRow: View {
             MerchantAvatar(
                 merchantName: transaction.displayMerchant,
                 size: 44,
-                contactImageData: contactImageData
+                contactImageData: contactImageData,
+                contactName: effectiveContactName,
+                // Falls back to the category SF Symbol when there's no
+                // brand favicon and no contact photo — more informative
+                // than two-letter initials for places like "Vishnu Garden
+                // Bar" where we don't have a logo on file.
+                categoryFallback: isContactOverride ? nil : transaction.category
             )
 
             VStack(alignment: .leading, spacing: 4) {
@@ -62,7 +68,7 @@ struct TransactionRow: View {
         .sheet(isPresented: $showDetailSheet) {
             TransactionDetailSheet(
                 transaction: transaction,
-                contactName: contactName,
+                contactName: effectiveContactName,
                 contactImageData: contactImageData
             )
         }
@@ -118,19 +124,38 @@ struct TransactionRow: View {
     }
 
     /// True when this row is rendering as a contact-overlay P2P. Used to
-    /// suppress the Places chip and override the category label.
+    /// suppress the Places chip and override the category label. Uses the
+    /// length-guarded contact name so single-letter matches don't trigger
+    /// a P2P override on an otherwise-valid merchant row.
     private var isContactOverride: Bool {
-        contactName != nil && !(contactName?.isEmpty ?? true)
+        effectiveContactName != nil
     }
 
     /// Title row: raw payee from the bank. Plain text. Truncate when long.
+    /// Uses the matched contact name when present AND long enough to be
+    /// useful (>= 3 chars). Single-letter or empty contact names (which
+    /// Contacts can return when a contact only has initials saved) are
+    /// rejected — falling back to the bank's raw name is more informative
+    /// than rendering "I" as a row title.
     private var titleText: String {
-        if let contactName, !contactName.isEmpty {
-            return contactName
+        if let cn = effectiveContactName, !cn.isEmpty {
+            return cn
         }
         return transaction.merchantRaw.isEmpty
             ? transaction.displayMerchant
             : transaction.merchantRaw
+    }
+
+    /// Contact name to use for the overlay, after applying the
+    /// minimum-length guard. nil means "treat this row as if there was no
+    /// contact match" — title falls back to merchantRaw, category stays
+    /// at whatever the backend decided.
+    private var effectiveContactName: String? {
+        guard let cn = contactName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              cn.count >= 3 else {
+            return nil
+        }
+        return cn
     }
 
     /// What goes inside the location chip. Prefer the resolved business

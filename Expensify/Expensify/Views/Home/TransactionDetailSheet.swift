@@ -58,12 +58,10 @@ struct TransactionDetailSheet: View {
     }
 
     /// Content-sized height per Apple HIG ("Sheets") — the sheet should be
-    /// just big enough for its contents, no taller. With a map: header
-    /// (~70) + 16 spacing + map (180) + 16 spacing + button (44) + 24
-    /// bottom padding + drag indicator + safe area ≈ 380. Without a map:
-    /// only the header + small bottom padding ≈ 140.
+    /// just big enough for its contents, no taller. Adds 14pts for the new
+    /// attribution caption ("probable nearby place" / "from your contacts").
     private var sheetHeight: CGFloat {
-        hasMap ? 380 : 140
+        hasMap ? 400 : 160
     }
 
     var body: some View {
@@ -91,10 +89,22 @@ struct TransactionDetailSheet: View {
             MerchantAvatar(
                 merchantName: primaryTitle,
                 size: 44,
-                contactImageData: contactImageData
+                contactImageData: contactImageData,
+                contactName: contactName,
+                categoryFallback: transaction.category
             )
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
+                // Small "where this name came from" caption. For Places-
+                // resolved rows it says "probable nearby place" so the user
+                // knows the headline name is a guess, not a hard fact from
+                // the bank. For contact-overlaid rows it shows the raw
+                // payee, so the underlying transaction context isn't lost.
+                if !attributionLabel.isEmpty {
+                    Text(attributionLabel)
+                        .font(.system(size: 10, weight: .semibold).smallCaps())
+                        .foregroundStyle(AppColor.textTertiary)
+                }
                 if !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.system(size: 12, weight: .regular))
@@ -117,6 +127,16 @@ struct TransactionDetailSheet: View {
                 .multilineTextAlignment(.trailing)
                 .layoutPriority(0)
         }
+    }
+
+    /// One-line attribution shown above the title in the sheet. Honest
+    /// signal about where the "what is this transaction" name came from.
+    private var attributionLabel: String {
+        if contactName != nil { return "from your contacts" }
+        if transaction.wasPlacesResolved || transaction.hasResolvedMerchant {
+            return "probable nearby place"
+        }
+        return ""
     }
 
     @ViewBuilder

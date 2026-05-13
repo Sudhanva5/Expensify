@@ -12,6 +12,7 @@ import { prisma } from '../db/client.js';
 import type { CategorizeContext, Enrichment } from '../categorize/types.js';
 import type { ParsedTransaction } from '../parsers/hdfc/index.js';
 import { checkBudgetForCategory } from './budgetAlerts.js';
+import { detectOnlineMerchant } from '../categorize/onlineMerchant.js';
 
 export type ProcessOutcome =
   | {
@@ -193,12 +194,25 @@ export async function processGmailMessage(
 
   const categorization = await categorize(parseResult.data, ctx, enrichment);
 
+  // Decide whether this row should ever receive a location update. We
+  // compute it BEFORE the insert so the DB row is born with the right
+  // locationStatus and iOS doesn't try to backfill it later. Three
+  // skip-conditions: online-looking merchants (.com / payment-aggregator
+  // prefix), alias-resolved merchants (we already know what they are),
+  // and the existing autopay + inbound paths handled inside upsert.
+  const onlineCheck = detectOnlineMerchant(parseResult.data.merchantRaw);
+  const aliasResolved =
+    categorization.picked?.source === 'alias' ||
+    categorization.picked?.source === 'autopay_alias';
+
   const upsert = await upsertTransaction({
     parsed: parseResult.data,
     categorization,
     gmailMessageId: msg.id,
     rawSubject: msg.subject,
     rawSnippet: msg.snippet || msg.body.slice(0, 200),
+    isOnlineMerchant: onlineCheck.isOnline,
+    isAliasResolved: aliasResolved,
   });
 
   if (!upsert.created) {
@@ -224,8 +238,19 @@ export async function processGmailMessage(
     }
   }
 
+  // iOS-side `needsLocation` mirrors the same logic — outflow, not autopay,
+  // not an online merchant, not alias-resolved.
   const needsLocation =
-    !parseResult.data.isAutopay && parseResult.data.direction === 'out';
+    !parseResult.data.isAutopay &&
+    parseResult.data.direction === 'out' &&
+    !onlineCheck.isOnline &&
+    !aliasResolved;
+
+  if (onlineCheck.isOnline) {
+    console.log(
+      `[location] skipping silent push for ${upsert.id} — online merchant (${onlineCheck.reason}: "${onlineCheck.matched}")`,
+    );
+  }
 
   const inrMinor =
     parseResult.data.amountInrMinor ?? parseResult.data.amountMinor;
