@@ -2,44 +2,51 @@ import SwiftUI
 
 /// Transaction row. Cred-inspired, restrained.
 ///
-///   ○  RAJESH KUMAR  ↗  ⓘ                                ₹547.00
-///       food                                              9 may '26
+///   ○  RAJESH KUMAR                                       ₹547.00
+///       food  📍 mtr jayanagar  ⓘ                         9 may '26
 ///
 /// Layout:
 ///   • Avatar (favicon or initials) on the left
-///   • Top: merchant title (tappable when we have coords — opens Maps) +
-///     amount on the right. A small `↗` glyph hints that the title is
-///     tappable. A tiny `ⓘ` button appears when Places resolved an actual
-///     business name (so the user can peek at "what this place really is"
-///     without losing the raw VPA payee in the title).
-///   • Bottom-left: category, alone. No inline location — the city was
-///     adding noise without telling the user anything they couldn't already
-///     infer from the tap-to-Maps title.
-///   • Bottom-right: small tertiary date
+///   • Top-left: merchant title (raw payee). Plain text, NOT tappable —
+///     we used to make this clickable but it conflated "see details" with
+///     "open Maps" and felt overloaded.
+///   • Bottom-left: category, then a small location chip if we have a
+///     Places-resolved name, then a small ⓘ to open the detail sheet.
+///     The chip is tappable and also opens the detail sheet (it's the
+///     primary affordance; the ⓘ is redundant but discoverable).
+///   • Bottom-right: small tertiary date.
+///   • Right edge: amount stacked over date.
 ///
-/// Color is reserved for signal: green for inflows (handled by
-/// `AmountText`), blue for the tappable title and ⓘ.
+/// Tapping the chip or the ⓘ presents `TransactionDetailSheet` as a
+/// medium-detent bottom sheet with the map preview.
 struct TransactionRow: View {
     let transaction: Transaction
+    /// Optional contact-overlay (when iOS matched this row's payee to a
+    /// device contact). Threaded through to the detail sheet so the
+    /// "VPA Name" small line shows the friend's display name.
+    var contactName: String? = nil
+    /// Optional contact photo data (the friend's DP from the address book).
+    /// Replaces the favicon/initials avatar when present.
+    var contactImageData: Data? = nil
 
-    /// Maximum number of characters before we tail-truncate the raw payee.
-    /// Long enough to read short business names; short enough that a
-    /// "GOOGLE PLAY INDIA PRIVATE LIMITED" string doesn't push the amount
-    /// off the screen.
-    private static let merchantTitleLineLimit: Int = 1
-
-    @State private var showPlacesPopover: Bool = false
+    @State private var showDetailSheet: Bool = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
-            MerchantAvatar(merchantName: transaction.displayMerchant, size: 44)
+            MerchantAvatar(
+                merchantName: transaction.displayMerchant,
+                size: 44,
+                contactImageData: contactImageData
+            )
 
             VStack(alignment: .leading, spacing: 4) {
-                titleRow
+                Text(titleText)
+                    .font(AppFont.rowTitle)
+                    .foregroundStyle(AppColor.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
-                Text(categoryText)
-                    .font(.system(size: 13))
-                    .foregroundStyle(AppColor.textSecondary)
+                metaLine
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -52,134 +59,108 @@ struct TransactionRow: View {
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())
+        .sheet(isPresented: $showDetailSheet) {
+            TransactionDetailSheet(
+                transaction: transaction,
+                contactName: contactName,
+                contactImageData: contactImageData
+            )
+        }
     }
 
-    /// Title + (↗) + (ⓘ). The title text shows the *raw* payee (e.g. the UPI
-    /// name on the bank email) so the user always sees what their bank sees;
-    /// the Places-resolved business name is one tap away on the ⓘ button.
-    /// When coords exist, tapping the title opens Maps directly.
+    /// Category line + (optional) location chip + (optional) ⓘ. Chip is
+    /// shown only when we have a Places-resolved name; ⓘ is shown when
+    /// either Places resolved this OR we just have coords (e.g. iOS
+    /// uploaded location but no Places match) — so the user always has a
+    /// way into the detail/map sheet when there's something to see.
     @ViewBuilder
-    private var titleRow: some View {
+    private var metaLine: some View {
         HStack(spacing: 6) {
-            titleLabel
-                .layoutPriority(1)
+            Text(categoryText)
+                .font(.system(size: 13))
+                .foregroundStyle(AppColor.textSecondary)
 
-            if transaction.shouldShowPlacesInfoButton {
-                Button {
-                    showPlacesPopover.toggle()
-                } label: {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(AppColor.tap)
+            // Location chip: ONLY when we have a Places-resolved name AND
+            // it's not a contact-matched P2P (where "MTR Hotel" near the
+            // friend's tea-shop would be a misleading match).
+            if !isContactOverride, transaction.hasResolvedMerchant {
+                Button(action: { showDetailSheet = true }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.system(size: 9, weight: .medium))
+                        Text(locationChipText)
+                            .font(.system(size: 12, weight: .medium))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(AppColor.tap)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(AppColor.tap.opacity(0.08))
+                    .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .popover(isPresented: $showPlacesPopover, arrowEdge: .top) {
-                    placesInfoPopover
-                        .presentationCompactAdaptation(.popover)
+            }
+
+            // ⓘ button: still surfaced even on contact rows so the user can
+            // peek the underlying VPA / time / map if they're curious.
+            if shouldShowInfo {
+                Button(action: { showDetailSheet = true }) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(AppColor.textTertiary)
                 }
-                .accessibilityLabel("Show resolved business name")
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show transaction details")
             }
 
             Spacer(minLength: 0)
         }
     }
 
-    /// The title itself. Tappable when we have coords (opens Maps + shows
-    /// a tiny `↗`); plain text otherwise. We use the raw payee here so the
-    /// title remains stable across pipeline tiers.
-    @ViewBuilder
-    private var titleLabel: some View {
-        if transaction.hasCoordinates,
-           let lat = transaction.locationLat,
-           let lng = transaction.locationLng {
-            Button {
-                MapsLinker.open(
-                    latitude: lat,
-                    longitude: lng,
-                    label: transaction.displayMerchant
-                )
-            } label: {
-                HStack(spacing: 3) {
-                    Text(titleText)
-                        .font(AppFont.rowTitle)
-                        .foregroundStyle(AppColor.textPrimary)
-                        .lineLimit(Self.merchantTitleLineLimit)
-                        .truncationMode(.tail)
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(AppColor.tap)
-                }
-            }
-            .buttonStyle(.plain)
-        } else {
-            Text(titleText)
-                .font(AppFont.rowTitle)
-                .foregroundStyle(AppColor.textPrimary)
-                .lineLimit(Self.merchantTitleLineLimit)
-                .truncationMode(.tail)
-        }
+    /// True when this row is rendering as a contact-overlay P2P. Used to
+    /// suppress the Places chip and override the category label.
+    private var isContactOverride: Bool {
+        contactName != nil && !(contactName?.isEmpty ?? true)
     }
 
-    /// Title text shown on the row. When we have a Places resolution, prefer
-    /// the raw payee (preserves what the bank actually said) so the info
-    /// button can reveal the Places-resolved name as the "what is this place
-    /// really" peek. Otherwise just show whatever the row holds.
+    /// Title row: raw payee from the bank. Plain text. Truncate when long.
     private var titleText: String {
-        if transaction.shouldShowPlacesInfoButton, !transaction.merchantRaw.isEmpty {
-            return transaction.merchantRaw
+        if let contactName, !contactName.isEmpty {
+            return contactName
         }
-        return transaction.displayMerchant
+        return transaction.merchantRaw.isEmpty
+            ? transaction.displayMerchant
+            : transaction.merchantRaw
     }
 
-    /// Popover content shown when the user taps the ⓘ. Surface the Places
-    /// resolved name as the headline since that's the value-add over the
-    /// raw payee; below it, the coords + a tap-to-open-Maps row so the
-    /// popover is self-contained.
-    @ViewBuilder
-    private var placesInfoPopover: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("from nearby places")
-                .font(.system(size: 10, weight: .semibold).smallCaps())
-                .foregroundStyle(AppColor.textTertiary)
-
-            Text(transaction.merchantNormalized)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(AppColor.textPrimary)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if transaction.hasCoordinates,
-               let lat = transaction.locationLat,
-               let lng = transaction.locationLng {
-                Button {
-                    MapsLinker.open(
-                        latitude: lat,
-                        longitude: lng,
-                        label: transaction.merchantNormalized
-                    )
-                    showPlacesPopover = false
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "map")
-                            .font(.system(size: 11, weight: .medium))
-                        Text("open in maps")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundStyle(AppColor.tap)
-                }
-                .buttonStyle(.plain)
-
-                Text(String(format: "%.5f, %.5f", lat, lng))
-                    .font(.system(size: 10, weight: .regular).monospacedDigit())
-                    .foregroundStyle(AppColor.textTertiary)
-            }
+    /// What goes inside the location chip. Prefer the resolved business
+    /// name; fall back to city or coordinates.
+    private var locationChipText: String {
+        if transaction.hasResolvedMerchant {
+            return transaction.merchantNormalized
         }
-        .padding(14)
-        .frame(maxWidth: 260, alignment: .leading)
+        if let city = transaction.locationCity, !city.isEmpty {
+            return city.lowercased()
+        }
+        if transaction.hasCoordinates {
+            return "location"
+        }
+        return ""
+    }
+
+    /// Show the ⓘ when the sheet would actually have something useful in
+    /// it — either a resolved business name or coords for the map.
+    private var shouldShowInfo: Bool {
+        transaction.hasResolvedMerchant || transaction.hasCoordinates
     }
 
     private var categoryText: String {
-        transaction.category?.shortName.lowercased() ?? "uncategorized"
+        if isContactOverride {
+            // Contact-matched rows are always personal transfers — override
+            // whatever the backend's tier chain decided.
+            return Category.personalTransfer.shortName.lowercased()
+        }
+        return transaction.category?.shortName.lowercased() ?? "uncategorized"
     }
 
     /// Compact date — "9 May '26".

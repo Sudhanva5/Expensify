@@ -10,6 +10,10 @@ import SwiftUI
 struct MerchantAvatar: View {
     let merchantName: String
     var size: CGFloat = 44
+    /// Optional contact photo data. When supplied, takes priority over
+    /// favicons + initials — the user's friend's actual DP fills the
+    /// circle. Sourced from `ContactsService.imageData(for:)`.
+    var contactImageData: Data? = nil
 
     private var faviconURL: URL? {
         MerchantBranding.faviconURL(for: merchantName, size: 128)
@@ -25,7 +29,15 @@ struct MerchantAvatar: View {
                 .fill(AppColor.avatarFill)
                 .frame(width: size, height: size)
 
-            if let url = faviconURL {
+            if let contactImageData,
+               let uiImage = UIImage(data: contactImageData) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
+            } else if let url = faviconURL {
                 AsyncImage(url: url, transaction: .init(animation: .easeOut(duration: 0.18))) { phase in
                     switch phase {
                     case .success(let image):

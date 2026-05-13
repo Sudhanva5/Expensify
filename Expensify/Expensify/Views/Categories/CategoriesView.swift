@@ -174,6 +174,8 @@ struct CategoryDetailView: View {
     let category: Category
     let range: DateRange
     @Environment(TransactionStore.self) private var store
+    @Environment(ContactsService.self) private var contactsService
+    @State private var editingTagFor: Transaction? = nil
 
     private var rows: [Transaction] {
         store.transactions
@@ -185,10 +187,18 @@ struct CategoryDetailView: View {
         ZStack {
             AppColor.canvas.ignoresSafeArea()
             List(rows) { tx in
-                TransactionRow(transaction: tx)
+                rowFor(tx)
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button {
+                            editingTagFor = tx
+                        } label: {
+                            Label("Edit Tag", systemImage: "tag")
+                        }
+                        .tint(AppColor.tap)
+                    }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -196,6 +206,20 @@ struct CategoryDetailView: View {
         }
         .navigationTitle(category.shortName.lowercased())
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $editingTagFor) { tx in
+            CategoryPickerSheet(transaction: tx, onPick: { _ in })
+                .environment(store)
+        }
+    }
+
+    @ViewBuilder
+    private func rowFor(_ tx: Transaction) -> some View {
+        let contact = contactsService.match(for: tx)
+        TransactionRow(
+            transaction: tx,
+            contactName: contact?.displayName,
+            contactImageData: contact.flatMap { contactsService.imageData(for: $0) }
+        )
     }
 }
 
@@ -204,4 +228,5 @@ struct CategoryDetailView: View {
     return CategoriesView(showSettings: $s)
         .environment(TransactionStore())
         .environment(BudgetStore())
+        .environment(ContactsService())
 }

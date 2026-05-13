@@ -66,10 +66,14 @@ export async function recategorizeWithLocation(opts: {
     return { updated: false, reason: 'not_outflow' };
   }
 
-  // Look up nearby places
+  // Look up nearby places. 10m is intentionally tight — wider radii were
+  // returning confidently-wrong matches for shops next door. iPhone GPS is
+  // typically accurate to ~5-10m outdoors; tightening to that keeps us
+  // honest. The trade-off is more "no_nearby_places" outcomes, which is
+  // fine — those drop into the review queue and the user resolves them.
   let candidates;
   try {
-    candidates = await places.nearby({ lat: opts.lat, lng: opts.lng, radiusMeters: 100 });
+    candidates = await places.nearby({ lat: opts.lat, lng: opts.lng, radiusMeters: 10 });
   } catch (err) {
     console.error('[recategorize] Places lookup failed:', err);
     return { updated: false, reason: 'places_call_failed' };
@@ -78,24 +82,27 @@ export async function recategorizeWithLocation(opts: {
     return { updated: false, reason: 'no_nearby_places' };
   }
 
-  // Walk candidates in the order Places returned them; the first one whose
-  // types map to a V1 category wins. Places typically orders by relevance
-  // / proximity, so the first hit is usually the right one. Skipping over
-  // unrecognized types lets the chosen merchant be a real storefront
-  // instead of, say, a "neighborhood" or "premise" polygon.
-  let chosen: typeof candidates[number] | undefined;
-  let match: ReturnType<typeof mapPlacesTypesToCategory> = null;
-  for (const candidate of candidates) {
-    const m = mapPlacesTypesToCategory(candidate.types);
-    if (m) {
-      chosen = candidate;
-      match = m;
-      break;
-    }
-  }
-  if (!chosen || !match) {
+  // Find every candidate whose types map to a V1 category, then require
+  // exactly ONE strong match within the radius. If two or more places
+  // around the same point both look like real merchants (e.g. two
+  // restaurants in the same building), we can't disambiguate from GPS
+  // alone — drop into review rather than guess.
+  const matched = candidates
+    .map((c) => ({ candidate: c, match: mapPlacesTypesToCategory(c.types) }))
+    .filter((row): row is { candidate: typeof candidates[number]; match: NonNullable<ReturnType<typeof mapPlacesTypesToCategory>> } => row.match !== null);
+
+  if (matched.length === 0) {
     return { updated: false, reason: 'no_recognized_place_type' };
   }
+  if (matched.length > 1) {
+    return {
+      updated: false,
+      reason: `ambiguous_${matched.length}_candidates`,
+    };
+  }
+
+  const chosen = matched[0]!.candidate;
+  const match = matched[0]!.match;
 
   const catRow = await prisma.category.findUnique({
     where: { name: match.category },

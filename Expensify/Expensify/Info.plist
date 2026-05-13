@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSContactsUsageDescription</key>
+	<string>Expensify uses your contacts on-device only — when a UPI transaction comes from someone you know, it shows their name and tags it as a personal transfer. Your contacts are never sent to a server.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

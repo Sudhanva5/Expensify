@@ -11,8 +11,13 @@ import SwiftUI
 struct HomeView: View {
     @Binding var showSettings: Bool
     @Environment(TransactionStore.self) private var store
+    @Environment(ContactsService.self) private var contactsService
     @State private var range: DateRange = .defaultRange
     @State private var instrumentFilter: String? = nil
+    /// When non-nil, the category-picker sheet is presented for this row.
+    /// Held at the parent so a swipe action across multiple rows doesn't
+    /// conflict with per-row sheet state.
+    @State private var editingTagFor: Transaction? = nil
 
     private var dateScoped: [Transaction] {
         store.transactions.filter { range.contains($0.occurredAt) }
@@ -62,6 +67,10 @@ struct HomeView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     AvatarButton(initials: CurrentUser.initials) { showSettings = true }
                 }
+            }
+            .sheet(item: $editingTagFor) { tx in
+                CategoryPickerSheet(transaction: tx, onPick: { _ in })
+                    .environment(store)
             }
         }
     }
@@ -120,10 +129,18 @@ struct HomeView: View {
                 ForEach(monthSections(), id: \.label) { section in
                     Section {
                         ForEach(section.transactions) { tx in
-                            TransactionRow(transaction: tx)
+                            rowFor(tx)
                                 .listRowSeparator(.hidden)
                                 .listRowBackground(Color.clear)
                                 .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button {
+                                        editingTagFor = tx
+                                    } label: {
+                                        Label("Edit Tag", systemImage: "tag")
+                                    }
+                                    .tint(AppColor.tap)
+                                }
                         }
                     } header: {
                         Text(section.label)
@@ -147,6 +164,18 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    /// Build a row with contact overlay (name + DP) when the transaction's
+    /// payee matches someone in the address book.
+    @ViewBuilder
+    private func rowFor(_ tx: Transaction) -> some View {
+        let contact = contactsService.match(for: tx)
+        TransactionRow(
+            transaction: tx,
+            contactName: contact?.displayName,
+            contactImageData: contact.flatMap { contactsService.imageData(for: $0) }
+        )
     }
 
     private struct MonthSection: Identifiable {
@@ -213,4 +242,5 @@ private struct EmptyHomeState: View {
     @Previewable @State var s = false
     return HomeView(showSettings: $s)
         .environment(TransactionStore())
+        .environment(ContactsService())
 }

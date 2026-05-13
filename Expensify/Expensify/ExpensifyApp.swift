@@ -16,13 +16,22 @@ struct ExpensifyApp: App {
     /// Single source of truth for budgets. Same instance is read by
     /// CategoriesView (progress bars) and SettingsView (edit list).
     @State private var budgetStore = BudgetStore()
+    /// Local-only contact matcher. Reads device contacts, never syncs to
+    /// the backend. Used to overlay friend names + DPs onto UPI rows.
+    @State private var contactsService = ContactsService()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environment(transactionStore)
                 .environment(budgetStore)
-                .task { await budgetStore.refresh() }
+                .environment(contactsService)
+                .task {
+                    await budgetStore.refresh()
+                    // Prompt for contacts access on first launch — also
+                    // builds the in-memory index on subsequent launches.
+                    await contactsService.requestAccessAndLoad()
+                }
                 // Force the whole app to light. Per .impeccable.md, this is
                 // a light-only product — money feels calmer in light, and
                 // we haven't designed a dark palette. Without this, iOS

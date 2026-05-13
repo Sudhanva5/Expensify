@@ -29,6 +29,22 @@ enum MerchantBranding {
         "OpenAI": "openai.com",
         "ChatGPT": "openai.com",
         "YouTube": "youtube.com",
+        // Google products — Google's favicon service only resolves real
+        // hostnames, so "Google Cloud" alone never matched. Map the
+        // common Google-* SaaS names back to google.com (close enough —
+        // they all share the same favicon).
+        "Google": "google.com",
+        "Google Cloud": "cloud.google.com",
+        "Google Cloud Platform": "cloud.google.com",
+        "GCP": "cloud.google.com",
+        "Google Workspace": "workspace.google.com",
+        "Google One": "one.google.com",
+        "Google Drive": "drive.google.com",
+        "YouTube Premium": "youtube.com",
+        "YouTube Music": "music.youtube.com",
+        "Gemini": "gemini.google.com",
+        "Google AI": "ai.google.com",
+        "Firebase": "firebase.google.com",
         "Cursor": "cursor.com",
         "GitHub": "github.com",
         "Apple": "apple.com",
@@ -76,14 +92,17 @@ enum MerchantBranding {
     /// Domain for a merchant name, if we have one mapped.
     static func domain(for merchantName: String) -> String? {
         let trimmed = merchantName.trimmingCharacters(in: .whitespaces)
-        // Exact case-insensitive match wins
+        // Exact case-insensitive match wins.
         if let exact = domainMap.first(where: { $0.key.caseInsensitiveCompare(trimmed) == .orderedSame }) {
             return exact.value
         }
-        // Substring match (handle "RAZ*Swiggy", "PAYU*Netflix", etc.)
-        for (key, value) in domainMap {
+        // Substring match — prefer the LONGEST matching key. Otherwise
+        // "Google" would beat "Google Cloud" on input like
+        // "PAYU*Google Cloud Platform Charge", giving the wrong favicon.
+        let sortedKeys = domainMap.keys.sorted { $0.count > $1.count }
+        for key in sortedKeys {
             if trimmed.range(of: key, options: .caseInsensitive) != nil {
-                return value
+                return domainMap[key]
             }
         }
         return nil
