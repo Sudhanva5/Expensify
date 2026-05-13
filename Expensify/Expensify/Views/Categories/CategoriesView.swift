@@ -193,7 +193,10 @@ struct CategoryDetailView: View {
                     .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button {
-                            editingTagFor = tx
+                            Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: 100_000_000)
+                                editingTagFor = tx
+                            }
                         } label: {
                             Label("Edit Tag", systemImage: "tag")
                         }
@@ -207,7 +210,7 @@ struct CategoryDetailView: View {
         .navigationTitle(category.shortName.lowercased())
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $editingTagFor) { tx in
-            CategoryPickerSheet(transaction: tx, onPick: { _ in })
+            CategoryPickerSheet(transaction: tx)
                 .environment(store)
         }
     }

@@ -1,26 +1,27 @@
 import SwiftUI
 
-/// Compact bottom sheet shown when the user swipes a row → "edit tag", or
-/// from any other "change this transaction's category" entry point. Lists
-/// the seven V1 categories as tappable rows; selecting one PATCHes the
-/// transaction via `APIClient.confirmTransaction(id:overrideCategory:)`
-/// and dismisses.
+/// Compact bottom sheet shown when the user swipes a row → "edit tag".
+/// Lists the seven V1 categories as tappable rows; selecting one fires
+/// `TransactionStore.retag(...)` which optimistically updates the row
+/// and PATCHes the backend in the background.
 ///
-/// Picks small enough that .medium detent feels right; the user shouldn't
-/// have to scroll a 7-row list.
+/// Sheet height is set explicitly so it matches content — see Apple HIG
+/// "Sheets": presentations should be sized for their content, not the
+/// full half-screen .medium detent. Anything taller than this would leave
+/// awkward whitespace below the seven category rows.
 struct CategoryPickerSheet: View {
-    /// Transaction to re-tag. Used for the title hint at the top.
     let transaction: Transaction
-    /// Caller-supplied success handler. Receives the chosen category so
-    /// the parent can optimistically update its local store before the
-    /// network round-trip lands.
-    var onPick: (Category) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @Environment(TransactionStore.self) private var store
 
-    @State private var saving: Bool = false
-    @State private var errorMessage: String? = nil
+    /// Content-sized detent. Computed from row count + paddings so the
+    /// sheet never has empty space below the list.
+    private var sheetHeight: CGFloat {
+        // header (~52) + divider (~16 with padding) + (7 rows × 48) +
+        // bottom padding (~24) + safe-area cushion (~36) ≈ 460
+        return 460
+    }
 
     var body: some View {
         ZStack {
@@ -30,18 +31,11 @@ struct CategoryPickerSheet: View {
                 header
                 Divider().opacity(0.4)
                 categoryList
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(AppFont.caption)
-                        .foregroundStyle(.red)
-                        .padding(.horizontal, 20)
-                }
                 Spacer(minLength: 0)
             }
             .padding(.top, 16)
-            .padding(.bottom, 18)
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.height(sheetHeight)])
         .presentationDragIndicator(.visible)
         .presentationBackground(AppColor.canvas)
     }
@@ -66,7 +60,7 @@ struct CategoryPickerSheet: View {
     private var categoryList: some View {
         VStack(spacing: 2) {
             ForEach(Category.allCases) { cat in
-                Button(action: { Task { await pick(cat) } }) {
+                Button(action: { pick(cat) }) {
                     HStack(spacing: 12) {
                         Image(systemName: cat.symbolName)
                             .font(.system(size: 14, weight: .semibold))
@@ -92,26 +86,17 @@ struct CategoryPickerSheet: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(saving)
             }
         }
     }
 
-    private func pick(_ category: Category) async {
-        saving = true
-        errorMessage = nil
-        defer { saving = false }
-        do {
-            try await APIClient.shared.confirmTransaction(
-                id: transaction.id,
-                overrideCategory: category
-            )
-            onPick(category)
-            await store.refresh()
-            dismiss()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+    /// Pick a category — fire the optimistic retag, dismiss immediately.
+    /// The store handles the network round-trip + error recovery; the user
+    /// shouldn't have to wait staring at the sheet while we POST.
+    private func pick(_ category: Category) {
+        let txId = transaction.id
+        Task { await store.retag(transactionId: txId, to: category) }
+        dismiss()
     }
 }
 
@@ -125,7 +110,7 @@ struct CategoryPickerSheet: View {
         locationCity: nil, locationStatus: .missed
     )
     return Color.gray.sheet(isPresented: .constant(true)) {
-        CategoryPickerSheet(transaction: mock, onPick: { _ in })
+        CategoryPickerSheet(transaction: mock)
             .environment(TransactionStore())
     }
 }

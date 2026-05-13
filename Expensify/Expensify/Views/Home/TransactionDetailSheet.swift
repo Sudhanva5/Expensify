@@ -57,6 +57,15 @@ struct TransactionDetailSheet: View {
         return ""
     }
 
+    /// Content-sized height per Apple HIG ("Sheets") — the sheet should be
+    /// just big enough for its contents, no taller. With a map: header
+    /// (~70) + 16 spacing + map (180) + 16 spacing + button (44) + 24
+    /// bottom padding + drag indicator + safe area ≈ 380. Without a map:
+    /// only the header + small bottom padding ≈ 140.
+    private var sheetHeight: CGFloat {
+        hasMap ? 380 : 140
+    }
+
     var body: some View {
         ZStack {
             AppColor.canvas.ignoresSafeArea()
@@ -71,7 +80,7 @@ struct TransactionDetailSheet: View {
             .padding(.top, 18)
             .padding(.bottom, 24)
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.height(sheetHeight)])
         .presentationDragIndicator(.visible)
         .presentationBackground(AppColor.canvas)
     }

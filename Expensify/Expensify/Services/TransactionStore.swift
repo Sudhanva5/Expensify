@@ -74,6 +74,52 @@ final class TransactionStore {
         }
     }
 
+    /// Optimistically retag a transaction. Updates the in-memory row first
+    /// so the user sees the change instantly, then PATCHes the backend. On
+    /// failure, refresh from the server to recover the true state.
+    ///
+    /// Called by the trailing-swipe category picker. Decoupled from the
+    /// view layer so the sheet can fire-and-forget without awaiting.
+    func retag(transactionId: String, to newCategory: Category) async {
+        guard let idx = transactions.firstIndex(where: { $0.id == transactionId }) else {
+            return
+        }
+        let original = transactions[idx]
+        let updated = Transaction(
+            id: original.id,
+            amountInr: original.amountInr,
+            currency: original.currency,
+            merchantRaw: original.merchantRaw,
+            merchantNormalized: original.merchantNormalized,
+            vpa: original.vpa,
+            direction: original.direction,
+            instrument: original.instrument,
+            occurredAt: original.occurredAt,
+            category: newCategory,
+            confidence: original.confidence,
+            signalSource: original.signalSource,
+            status: .resolved,
+            locationLat: original.locationLat,
+            locationLng: original.locationLng,
+            locationCity: original.locationCity,
+            locationStatus: original.locationStatus
+        )
+        transactions[idx] = updated
+
+        do {
+            try await APIClient.shared.confirmTransaction(
+                id: transactionId,
+                overrideCategory: newCategory
+            )
+        } catch {
+            #if DEBUG
+            print("[TransactionStore] retag failed for \(transactionId): \(error)")
+            #endif
+            // Pull authoritative state so we don't show a stale optimistic value.
+            await refresh()
+        }
+    }
+
     // MARK: - Auto-retry
 
     private func scheduleAutoRetry() {

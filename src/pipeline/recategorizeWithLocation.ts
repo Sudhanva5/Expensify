@@ -82,14 +82,29 @@ export async function recategorizeWithLocation(opts: {
     return { updated: false, reason: 'no_nearby_places' };
   }
 
+  // The Places API "radius" is a hint, not a hard filter — it'll happily
+  // return shops 20-30m away when ranked by relevance. Re-filter strictly
+  // using a real haversine distance on the candidate centroids, so we only
+  // consider places that are physically within ~15m of the transaction GPS.
+  // (Slightly wider than the request radius to absorb GPS jitter on both
+  // ends of the comparison.)
+  const STRICT_DISTANCE_M = 15;
+  const tightlyNearby = candidates.filter((c) => {
+    if (!c.lat || !c.lng) return false;
+    return haversineMeters(opts.lat, opts.lng, c.lat, c.lng) <= STRICT_DISTANCE_M;
+  });
+  if (tightlyNearby.length === 0) {
+    return { updated: false, reason: 'no_places_within_strict_distance' };
+  }
+
   // Find every candidate whose types map to a V1 category, then require
-  // exactly ONE strong match within the radius. If two or more places
+  // exactly ONE strong match within the strict radius. If two or more places
   // around the same point both look like real merchants (e.g. two
   // restaurants in the same building), we can't disambiguate from GPS
   // alone — drop into review rather than guess.
-  const matched = candidates
+  const matched = tightlyNearby
     .map((c) => ({ candidate: c, match: mapPlacesTypesToCategory(c.types) }))
-    .filter((row): row is { candidate: typeof candidates[number]; match: NonNullable<ReturnType<typeof mapPlacesTypesToCategory>> } => row.match !== null);
+    .filter((row): row is { candidate: typeof tightlyNearby[number]; match: NonNullable<ReturnType<typeof mapPlacesTypesToCategory>> } => row.match !== null);
 
   if (matched.length === 0) {
     return { updated: false, reason: 'no_recognized_place_type' };
@@ -145,4 +160,26 @@ export async function recategorizeWithLocation(opts: {
     confidence: match.confidence,
     matchedPlacesType: match.matchedType,
   };
+}
+
+/**
+ * Great-circle distance between two lat/lng points, in metres.
+ * Standard haversine formula — accurate enough at the metre scale that
+ * matters for our "is this candidate physically inside the radius" check.
+ */
+function haversineMeters(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+): number {
+  const R = 6_371_000; // Earth radius in metres
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }

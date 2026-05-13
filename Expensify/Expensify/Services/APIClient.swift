@@ -117,7 +117,11 @@ actor APIClient {
     // MARK: - Budgets
 
     private struct BudgetWire: Decodable {
-        let id: Int
+        // Prisma's Budget.id is a CUID — a string, NOT a number. Previously
+        // typed as Int, which silently broke every fetchBudgets() because
+        // JSONDecoder threw on every response and the catch swallowed it,
+        // leaving BudgetStore.byCategory empty on every cold start.
+        let id: String
         let category: String
         let monthlyLimitInr: Decimal
         let alertThresholds: [Decimal]
@@ -162,11 +166,23 @@ actor APIClient {
             enabled: budget.enabled
         )
 
+        // Critical: .urlPathAllowed lets `/` through unencoded. That makes
+        // "Groceries / Kirana Stores" decode into THREE path segments at the
+        // Fastify side, missing the /:categoryName route and returning 404.
+        // Subtract `/` so the slash gets %2F-encoded.
+        // We also bypass URL.appendingPathComponent here because it re-
+        // decodes the %2F back to a literal `/` on some iOS versions —
+        // build the full URL string directly and parse it instead.
+        let segmentSafe = CharacterSet.urlPathAllowed
+            .subtracting(CharacterSet(charactersIn: "/"))
         let encodedName = budget.category.rawValue.addingPercentEncoding(
-            withAllowedCharacters: .urlPathAllowed
+            withAllowedCharacters: segmentSafe
         ) ?? budget.category.rawValue
+        guard let url = URL(string: "\(Constants.baseURL.absoluteString)/budgets/\(encodedName)") else {
+            throw APIError.invalidResponse
+        }
 
-        var req = URLRequest(url: Constants.baseURL.appendingPathComponent("/budgets/\(encodedName)"))
+        var req = URLRequest(url: url)
         req.httpMethod = "PUT"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
@@ -195,10 +211,16 @@ actor APIClient {
 
     /// Delete the budget for a category. No-op if none exists.
     func deleteBudget(category: Category) async throws {
+        // Same slash-encoding + URL-construction fix as upsertBudget.
+        let segmentSafe = CharacterSet.urlPathAllowed
+            .subtracting(CharacterSet(charactersIn: "/"))
         let encodedName = category.rawValue.addingPercentEncoding(
-            withAllowedCharacters: .urlPathAllowed
+            withAllowedCharacters: segmentSafe
         ) ?? category.rawValue
-        var req = URLRequest(url: Constants.baseURL.appendingPathComponent("/budgets/\(encodedName)"))
+        guard let url = URL(string: "\(Constants.baseURL.absoluteString)/budgets/\(encodedName)") else {
+            throw APIError.invalidResponse
+        }
+        var req = URLRequest(url: url)
         req.httpMethod = "DELETE"
         req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
         let (data, http) = try await HTTPClient.shared.send(req)

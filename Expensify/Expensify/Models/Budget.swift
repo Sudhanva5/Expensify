@@ -11,7 +11,10 @@ import Foundation
 ///     in `extraThresholds` so a save round-trip doesn't drop them.
 struct Budget: Identifiable, Hashable {
     let id: String
-    let backendId: Int?
+    /// CUID assigned by Postgres/Prisma — string, not int. `nil` for
+    /// budgets the user just authored client-side that haven't yet been
+    /// persisted (rare; mostly a transient state during the upsert call).
+    let backendId: String?
     let category: Category
     var monthlyLimitInr: Decimal?
     var alertAt80: Bool
@@ -24,7 +27,7 @@ struct Budget: Identifiable, Hashable {
 
     init(
         id: String = UUID().uuidString,
-        backendId: Int? = nil,
+        backendId: String? = nil,
         category: Category,
         monthlyLimitInr: Decimal? = nil,
         alertAt80: Bool = true,

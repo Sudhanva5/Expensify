@@ -98,13 +98,13 @@ final class ContactsService {
     private func reload(using store: CNContactStore) async {
         await Task.detached(priority: .utility) {
             let keysToFetch: [CNKeyDescriptor] = [
-                CNContactGivenNameKey,
-                CNContactFamilyNameKey,
-                CNContactPhoneNumbersKey,
-                CNContactThumbnailImageDataAvailableKey,
-                CNContactIdentifierKey,
+                CNContactGivenNameKey as CNKeyDescriptor,
+                CNContactFamilyNameKey as CNKeyDescriptor,
+                CNContactPhoneNumbersKey as CNKeyDescriptor,
+                CNContactImageDataAvailableKey as CNKeyDescriptor,
+                CNContactIdentifierKey as CNKeyDescriptor,
                 CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
-            ] as [CNKeyDescriptor]
+            ]
 
             let request = CNContactFetchRequest(keysToFetch: keysToFetch)
             var fetched: [Contact] = []

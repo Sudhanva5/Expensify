@@ -69,7 +69,7 @@ struct HomeView: View {
                 }
             }
             .sheet(item: $editingTagFor) { tx in
-                CategoryPickerSheet(transaction: tx, onPick: { _ in })
+                CategoryPickerSheet(transaction: tx)
                     .environment(store)
             }
         }
@@ -135,7 +135,15 @@ struct HomeView: View {
                                 .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     Button {
-                                        editingTagFor = tx
+                                        // Small async hop so SwiftUI can
+                                        // finish dismissing the swipe-action
+                                        // tray before we present the sheet.
+                                        // Without this, .sheet(item:) often
+                                        // silently no-ops on iOS 17.
+                                        Task { @MainActor in
+                                            try? await Task.sleep(nanoseconds: 100_000_000)
+                                            editingTagFor = tx
+                                        }
                                     } label: {
                                         Label("Edit Tag", systemImage: "tag")
                                     }
