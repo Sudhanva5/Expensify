@@ -47,6 +47,29 @@ final class ContactsService {
     var authorization: Authorization = .notDetermined
     var lastError: String? = nil
 
+    /// Diagnostic counts, surfaced via `diagnostics` for in-app debugging.
+    /// Updated on every reload(). Lets the user see if photo prefetch is
+    /// actually populating cache without needing Xcode console.
+    var diagnostics: Diagnostics = .empty
+
+    struct Diagnostics: Equatable {
+        let contactCount: Int
+        let phonesIndexed: Int
+        let photosCached: Int
+        let photosFromThumb: Int
+        let photosFromFull: Int
+        let flagSaysAvailable: Int
+
+        static let empty = Diagnostics(
+            contactCount: 0, phonesIndexed: 0, photosCached: 0,
+            photosFromThumb: 0, photosFromFull: 0, flagSaysAvailable: 0
+        )
+
+        var summary: String {
+            "\(contactCount) contacts · \(photosCached) photos (\(photosFromThumb) thumb + \(photosFromFull) full) · flag claimed \(flagSaysAvailable)"
+        }
+    }
+
     /// Normalized last-10-digit phone → list of contacts that have that
     /// number. Phone is the only field that's actually unique — name
     /// matching gave us false positives ("Sneha Bubbly" matching to
@@ -137,28 +160,31 @@ final class ContactsService {
                     let display = formatter.string(from: cn) ?? "\(cn.givenName) \(cn.familyName)".trimmingCharacters(in: .whitespaces)
                     guard !display.isEmpty else { return }
                     let phones = cn.phoneNumbers.map { $0.value.stringValue }
-                    let hasPhoto = cn.imageDataAvailable
+                    let flagSaysAvailable = cn.imageDataAvailable
                     let c = Contact(
                         id: cn.identifier,
                         displayName: display,
                         givenName: cn.givenName,
                         familyName: cn.familyName,
                         phoneNumbers: phones,
-                        hasPhoto: hasPhoto
+                        hasPhoto: flagSaysAvailable
                     )
                     fetched.append(c)
                     cnById[cn.identifier] = cn
-                    if hasPhoto {
-                        photoStats.available += 1
-                        if let data = cn.thumbnailImageData {
-                            photos[cn.identifier] = data
-                            photoStats.withThumb += 1
-                        } else if let data = cn.imageData {
-                            // Fall back to full image when no thumbnail
-                            // exists. iOS will downsample at render time.
-                            photos[cn.identifier] = data
-                            photoStats.withFull += 1
-                        }
+                    // ALWAYS try to grab photo data regardless of the
+                    // imageDataAvailable flag — that flag has been seen to
+                    // return false for iCloud-synced contacts whose photos
+                    // ARE reachable via thumbnailImageData / imageData.
+                    // Trust the data, not the flag.
+                    if flagSaysAvailable { photoStats.available += 1 }
+                    if let data = cn.thumbnailImageData {
+                        photos[cn.identifier] = data
+                        photoStats.withThumb += 1
+                    } else if let data = cn.imageData {
+                        // Fall back to full image when no thumbnail exists.
+                        // iOS downsamples at render time.
+                        photos[cn.identifier] = data
+                        photoStats.withFull += 1
                     }
                 }
             } catch {
@@ -171,10 +197,19 @@ final class ContactsService {
             await MainActor.run {
                 self.allContacts = fetched
                 self.cnContactsById = cnById
-                self.indexByPhone = Self.buildPhoneIndex(from: fetched)
+                let phoneIndex = Self.buildPhoneIndex(from: fetched)
+                self.indexByPhone = phoneIndex
                 self.photoCache = photos
+                self.diagnostics = Diagnostics(
+                    contactCount: fetched.count,
+                    phonesIndexed: phoneIndex.count,
+                    photosCached: photos.count,
+                    photosFromThumb: photoStats.withThumb,
+                    photosFromFull: photoStats.withFull,
+                    flagSaysAvailable: photoStats.available
+                )
                 #if DEBUG
-                print("[ContactsService] indexed \(fetched.count) contacts; photos: \(photos.count) cached (\(photoStats.withThumb) thumb + \(photoStats.withFull) full); \(photoStats.available) marked imageDataAvailable")
+                print("[ContactsService] indexed \(fetched.count) contacts; photos: \(photos.count) cached (\(photoStats.withThumb) thumb + \(photoStats.withFull) full); flag-said-available: \(photoStats.available)")
                 #endif
             }
         }.value

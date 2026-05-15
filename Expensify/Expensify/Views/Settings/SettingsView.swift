@@ -5,9 +5,11 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(BudgetStore.self) private var budgetStore
+    @Environment(ContactsService.self) private var contactsService
 
     @State private var pingState: PingState = .idle
     @State private var pingResult: APIClient.PingResult?
+    @State private var contactsReloading: Bool = false
 
     enum PingState { case idle, running, done }
 
@@ -25,6 +27,7 @@ struct SettingsView: View {
                 List {
                     profileSection
                     connectionSection
+                    contactsSection
                     budgetsSection
                     accountSection
                 }
@@ -123,6 +126,79 @@ struct SettingsView: View {
         pingState = .done
     }
 
+    /// Surface contact-matching state so the user can tell whether the
+    /// in-app contacts index is healthy. Shows authorization status, total
+    /// contacts loaded, and how many of them have a photo cached. A
+    /// `0 photos cached` row with hundreds of contacts means we couldn't
+    /// pull the image data — usually a permission or sync-state issue.
+    private var contactsSection: some View {
+        Section {
+            HStack {
+                Text("permission")
+                    .font(.system(size: 15))
+                    .foregroundStyle(AppColor.textPrimary)
+                Spacer()
+                Text(authLabel)
+                    .font(AppFont.caption.monospaced())
+                    .foregroundStyle(authColor)
+            }
+            HStack(alignment: .top) {
+                Text("indexed")
+                    .font(.system(size: 15))
+                    .foregroundStyle(AppColor.textPrimary)
+                Spacer()
+                Text(contactsService.diagnostics.summary)
+                    .font(AppFont.caption.monospaced())
+                    .foregroundStyle(AppColor.textTertiary)
+                    .multilineTextAlignment(.trailing)
+            }
+
+            Button {
+                Task {
+                    contactsReloading = true
+                    await contactsService.requestAccessAndLoad()
+                    contactsReloading = false
+                }
+            } label: {
+                HStack {
+                    Text("reload contacts")
+                        .foregroundStyle(AppColor.textPrimary)
+                    Spacer()
+                    if contactsReloading {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+            }
+            .disabled(contactsReloading)
+        } header: {
+            Text("contacts")
+                .font(AppFont.sectionLabel)
+                .foregroundStyle(AppColor.textTertiary)
+        } footer: {
+            Text("if photos aren't showing on P2P rows, check that `photos` count above is non-zero. If contacts permission was denied, tap reload after re-enabling it in Settings → Expensify → Contacts.")
+                .font(AppFont.caption)
+                .foregroundStyle(AppColor.textTertiary)
+        }
+    }
+
+    private var authLabel: String {
+        switch contactsService.authorization {
+        case .notDetermined: return "not asked"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        case .authorized: return "authorized"
+        case .limited: return "limited"
+        }
+    }
+
+    private var authColor: Color {
+        switch contactsService.authorization {
+        case .authorized, .limited: return AppColor.inflow
+        case .denied, .restricted: return .red
+        case .notDetermined: return AppColor.textTertiary
+        }
+    }
+
     private var budgetsSection: some View {
         Section {
             ForEach(allBudgetRows) { budget in
@@ -193,4 +269,5 @@ private struct BudgetSummaryRow: View {
 #Preview {
     SettingsView()
         .environment(BudgetStore())
+        .environment(ContactsService())
 }
