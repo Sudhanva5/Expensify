@@ -10,12 +10,23 @@ final class TransactionStore {
     var transactions: [Transaction] = []
     var connectionState: ConnectionState = .idle
     var lastFetchedAt: Date? = nil
+    /// When the current refresh started. The UI uses this to show a
+    /// "still loading from <host>" diagnostic if a fetch hangs >5s,
+    /// so the user can see *where* it's stuck without Xcode console.
+    var refreshStartedAt: Date? = nil
 
     enum ConnectionState: Equatable {
         case idle
         case loading
         case ok
         case failing(message: String)
+    }
+
+    /// Host portion of the configured baseURL, surfaced for the in-app
+    /// diagnostic banner. Lets the user verify they're on the rebuilt
+    /// app (new custom-domain URL) vs. an older install.
+    var baseHost: String {
+        Constants.baseURL.host ?? "?"
     }
 
     /// Back-compat conveniences for the views that already check these.
@@ -62,14 +73,30 @@ final class TransactionStore {
         // Don't pile concurrent fetches
         if case .loading = connectionState { return }
         connectionState = .loading
+        refreshStartedAt = Date()
+
+        #if DEBUG
+        print("[TransactionStore] refresh start → \(Constants.baseURL.absoluteString)")
+        let t0 = Date()
+        #endif
 
         do {
             transactions = try await APIClient.shared.fetchTransactions()
             lastFetchedAt = Date()
             connectionState = .ok
+            refreshStartedAt = nil
             cancelAutoRetry()
+            #if DEBUG
+            let ms = Int(Date().timeIntervalSince(t0) * 1000)
+            print("[TransactionStore] refresh ok → \(transactions.count) rows in \(ms)ms")
+            #endif
         } catch {
+            #if DEBUG
+            let ms = Int(Date().timeIntervalSince(t0) * 1000)
+            print("[TransactionStore] refresh FAILED after \(ms)ms → \(error.localizedDescription)")
+            #endif
             connectionState = .failing(message: error.localizedDescription)
+            refreshStartedAt = nil
             scheduleAutoRetry()
         }
     }

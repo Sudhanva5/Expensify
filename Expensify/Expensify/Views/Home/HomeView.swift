@@ -107,16 +107,9 @@ struct HomeView: View {
             // States
             if store.isLoading && store.transactions.isEmpty {
                 Section {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text("loading transactions…")
-                            .font(AppFont.rowSubtitle)
-                            .foregroundStyle(AppColor.textSecondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 28)
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+                    LoadingDiagnostic(store: store)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                 }
             } else if filtered.isEmpty {
                 Section {
@@ -218,6 +211,58 @@ struct HomeView: View {
         case 17..<22: return "good evening. here's where your money went."
         default: return "late night. here's where your money went."
         }
+    }
+}
+
+/// Shown while the very first transactions fetch is in flight (no data
+/// yet). Initially just a spinner; after ~5 seconds it expands to show
+/// the host being queried + elapsed time, so the user can verify (a)
+/// they're on the rebuilt app pointing at the new custom domain and
+/// (b) where the request is stuck without opening Xcode console.
+private struct LoadingDiagnostic: View {
+    let store: TransactionStore
+    @State private var now: Date = Date()
+    /// Tick every 0.5s so elapsedSeconds re-renders the diagnostic line.
+    private let tick = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+
+    private var elapsedSeconds: Int {
+        guard let started = store.refreshStartedAt else { return 0 }
+        return Int(now.timeIntervalSince(started))
+    }
+
+    private var showDiagnostic: Bool {
+        elapsedSeconds >= 5
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("loading transactions…")
+                    .font(AppFont.rowSubtitle)
+                    .foregroundStyle(AppColor.textSecondary)
+            }
+
+            if showDiagnostic {
+                VStack(spacing: 4) {
+                    Text("host: \(store.baseHost)")
+                        .font(AppFont.caption.monospaced())
+                        .foregroundStyle(AppColor.textTertiary)
+                    Text("elapsed: \(elapsedSeconds)s")
+                        .font(AppFont.caption.monospaced())
+                        .foregroundStyle(AppColor.textTertiary)
+                    if elapsedSeconds >= 15 {
+                        Text("(taking longer than usual)")
+                            .font(AppFont.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+        .onReceive(tick) { _ in now = Date() }
     }
 }
 
