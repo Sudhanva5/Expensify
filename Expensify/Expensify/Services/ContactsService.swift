@@ -3,20 +3,22 @@ import Contacts
 import Observation
 
 /// Local-only contact matcher. Reads the user's Contacts on demand, builds
-/// an index of "normalized phone number" → contact, and answers one
-/// question for the rest of the app:
+/// a phone-number index (and keeps the full list for name fallback), and
+/// answers one question for the rest of the app:
 ///
-///   `match(for transaction:)` — was this UPI transaction sent to a phone
-///   number that lives in your address book? When the VPA carries an
-///   embedded phone (`9876543210@ybl`) and that phone matches a contact,
-///   the iOS app overlays the contact's display name + photo onto the
-///   row AND force-tags the category as P2P.
+///   `match(for transaction:)` — was this UPI transaction sent to someone
+///   in your address book? Two-pass:
 ///
-/// Matching is **strictly by phone number** — name matching was disabled
-/// after producing false positives (e.g. "Sneha Bubbly" matching "Sneha
-/// Appa" because they share a given name). VPAs whose local-part is a
-/// handle (`sneha.r@oksbi`) don't yield a match here; those land in the
-/// review queue or default merchant pipeline instead.
+///     1. Phone-number match (high confidence). The VPA's local part
+///        parses as a digit string that's also one of the contact's
+///        phone numbers.
+///     2. Multi-token name match with strict uniqueness (medium). The
+///        bank-payee text has ≥2 meaningful tokens, and exactly one
+///        contact has all of them in their display name.
+///
+/// Pass 2 deliberately drops single-letter tokens (initials like "R")
+/// and refuses to guess when multiple contacts could match — that's
+/// what stopped the earlier "Sneha Bubbly → Sneha Appa" false positive.
 ///
 /// Privacy:
 ///   • Contacts NEVER leave the device. No network calls. No sync.
@@ -210,32 +212,64 @@ final class ContactsService {
 
     // MARK: - Matching
 
-    /// Returns the contact a transaction was sent to, matched by **phone
-    /// number embedded in the VPA**. Phone is the only truly unique field;
-    /// name-based matching gave us false positives like "Sneha Bubbly"
-    /// matching to "Sneha Appa" because they share a given name.
+    /// Returns the contact a transaction was sent to. Two passes:
     ///
-    /// Only matches when:
-    ///   - direction = out (it's an outbound payment)
-    ///   - instrument starts with "account_" (UPI from your bank, not card)
-    ///   - the VPA's local part parses as a 10-digit phone number
-    ///   - some contact in the address book has that same number
+    ///   1. **Phone match** (highest confidence): VPA's local part parses
+    ///      as a phone number that lives in the address book.
+    ///   2. **Multi-token name match** (medium confidence): the bank's
+    ///      payee text has ≥2 meaningful tokens (single-letter initials
+    ///      dropped), AND **exactly one** contact has all of those tokens
+    ///      in their display name. Returning nil on ambiguity is the
+    ///      whole point — it's what stopped "Sneha Bubbly" matching to
+    ///      "Sneha Appa" before.
     ///
-    /// Returns nil for transactions whose VPA local-part is a name handle
-    /// (`sneha.r@oksbi`, `bob.smith@axl`). Those land in the review queue
-    /// or default merchant pipeline — no risky fuzzy-name match.
+    /// Only runs for outbound UPI transactions from your bank account
+    /// (`account_*` instrument). Credit-card transactions to a name look
+    /// like personal transfers but are actually tips/services.
     func match(for transaction: Transaction) -> Contact? {
         guard transaction.direction == .out else { return nil }
         guard transaction.instrument.hasPrefix("account_") else { return nil }
-        guard let vpa = transaction.vpa, !vpa.isEmpty else { return nil }
-        guard let phone = Self.phoneFromVpa(vpa) else { return nil }
-        guard let candidates = indexByPhone[phone], !candidates.isEmpty else {
-            return nil
+
+        // --- Pass 1: phone-based match -----------------------------------
+        if let vpa = transaction.vpa,
+           let phone = Self.phoneFromVpa(vpa),
+           let phoneCandidates = indexByPhone[phone],
+           !phoneCandidates.isEmpty {
+            return phoneCandidates[0]
         }
-        // Phone numbers are unique — there should only ever be one contact
-        // per number. If duplicates exist, take the first; the user can
-        // clean up their address book.
-        return candidates[0]
+
+        // --- Pass 2: strict multi-token name match -----------------------
+        let payeeTokens = Self.nameTokens(transaction.merchantRaw)
+        // Need at least 2 meaningful tokens — a single name like "SNEHA"
+        // is ambiguous against any address book that has multiple Snehas.
+        guard payeeTokens.count >= 2 else { return nil }
+
+        let payeeSet = Set(payeeTokens)
+        let nameCandidates = allContacts.filter { contact in
+            let contactSet = Set(Self.nameTokens(contact.displayName))
+            // Every payee token must appear in the contact's name set.
+            return payeeSet.isSubset(of: contactSet)
+        }
+        // Match only on uniqueness — if two contacts both satisfy, drop
+        // the match rather than guess.
+        return nameCandidates.count == 1 ? nameCandidates[0] : nil
+    }
+
+    /// Normalize a name into its meaningful tokens. Lowercases, strips
+    /// punctuation, drops single-character tokens (initials like "R" or
+    /// "K" are too noisy to disambiguate on).
+    private static func nameTokens(_ s: String) -> [String] {
+        s.unicodeScalars
+            .map { scalar -> Character in
+                CharacterSet.letters.contains(scalar) || scalar == " "
+                    ? Character(scalar)
+                    : " "
+            }
+            .reduce(into: "") { $0.append($1) }
+            .lowercased()
+            .split(separator: " ", omittingEmptySubsequences: true)
+            .map(String.init)
+            .filter { $0.count >= 2 }
     }
 
     /// Get the contact's photo data. Pure cache lookup — the thumbnail
