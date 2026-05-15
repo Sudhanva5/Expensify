@@ -71,8 +71,12 @@ export async function sendLocationRequestPush(args: LocationRequestPushArgs): Pr
     kind: 'request_location',
     transactionId: args.transactionId,
   };
-  // 5-minute relevance window; if the device is offline longer it's stale.
-  note.expiry = Math.floor(Date.now() / 1000) + 5 * 60;
+  // 90-second relevance window. If APNs can't deliver within that, the
+  // user has almost certainly moved away from the transaction site —
+  // posting their location 4 minutes later would tag the wrong place.
+  // Better to let the push expire and pick the row up in the foreground
+  // catchup (which only attaches location to <5min-old rows anyway).
+  note.expiry = Math.floor(Date.now() / 1000) + 90;
 
   try {
     const result = await p.send(note, args.apnsToken);

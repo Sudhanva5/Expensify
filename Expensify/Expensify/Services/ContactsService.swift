@@ -102,11 +102,18 @@ final class ContactsService {
 
     private func reload(using store: CNContactStore) async {
         await Task.detached(priority: .utility) {
+            // Pull thumbnail data in the initial enumeration. Doing this
+            // eagerly (vs. lazy-fetching per-render later) means:
+            //   • Main-thread render never blocks on Contacts I/O
+            //   • Every contact-matched row's photo is ready instantly
+            //   • Cost is bounded: ~4KB per contact thumbnail × ~500
+            //     contacts ≈ 2MB of memory. Fine for V1.
             let keysToFetch: [CNKeyDescriptor] = [
                 CNContactGivenNameKey as CNKeyDescriptor,
                 CNContactFamilyNameKey as CNKeyDescriptor,
                 CNContactPhoneNumbersKey as CNKeyDescriptor,
                 CNContactImageDataAvailableKey as CNKeyDescriptor,
+                CNContactThumbnailImageDataKey as CNKeyDescriptor,
                 CNContactIdentifierKey as CNKeyDescriptor,
                 CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
             ]
@@ -114,6 +121,7 @@ final class ContactsService {
             let request = CNContactFetchRequest(keysToFetch: keysToFetch)
             var fetched: [Contact] = []
             var cnById: [String: CNContact] = [:]
+            var photos: [String: Data] = [:]
             do {
                 try store.enumerateContacts(with: request) { cn, _ in
                     let formatter = CNContactFormatter()
@@ -121,16 +129,20 @@ final class ContactsService {
                     let display = formatter.string(from: cn) ?? "\(cn.givenName) \(cn.familyName)".trimmingCharacters(in: .whitespaces)
                     guard !display.isEmpty else { return }
                     let phones = cn.phoneNumbers.map { $0.value.stringValue }
+                    let hasPhoto = cn.imageDataAvailable
                     let c = Contact(
                         id: cn.identifier,
                         displayName: display,
                         givenName: cn.givenName,
                         familyName: cn.familyName,
                         phoneNumbers: phones,
-                        hasPhoto: cn.imageDataAvailable
+                        hasPhoto: hasPhoto
                     )
                     fetched.append(c)
                     cnById[cn.identifier] = cn
+                    if hasPhoto, let data = cn.thumbnailImageData {
+                        photos[cn.identifier] = data
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -143,6 +155,7 @@ final class ContactsService {
                 self.allContacts = fetched
                 self.cnContactsById = cnById
                 self.indexByPhone = Self.buildPhoneIndex(from: fetched)
+                self.photoCache = photos
             }
         }.value
     }
@@ -225,26 +238,11 @@ final class ContactsService {
         return candidates[0]
     }
 
-    /// Get the contact's photo data. Loads from the CNContact on first
-    /// request, then caches. Returns nil if the contact has no photo or
-    /// permission was revoked.
+    /// Get the contact's photo data. Pure cache lookup — the thumbnail
+    /// was prefetched during `reload()`, so this never blocks the main
+    /// thread and is safe to call from every row render.
     func imageData(for contact: Contact) -> Data? {
-        if let cached = photoCache[contact.id] { return cached }
-        guard contact.hasPhoto, let cn = cnContactsById[contact.id] else { return nil }
-        // Re-fetch the contact with image data — the initial enumeration
-        // didn't pull the JPEG bytes to keep memory low.
-        let store = CNContactStore()
-        let keys: [CNKeyDescriptor] = [CNContactThumbnailImageDataKey as CNKeyDescriptor]
-        do {
-            let full = try store.unifiedContact(withIdentifier: cn.identifier, keysToFetch: keys)
-            if let data = full.thumbnailImageData {
-                photoCache[contact.id] = data
-                return data
-            }
-        } catch {
-            return nil
-        }
-        return nil
+        photoCache[contact.id]
     }
 
 }

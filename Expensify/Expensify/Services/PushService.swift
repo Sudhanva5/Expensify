@@ -86,6 +86,10 @@ final class PushService: NSObject, UNUserNotificationCenterDelegate {
         }
 
         do {
+            // fetchOnce now WAITS for a sub-30m fix (up to 15s) instead of
+            // grabbing the first cached cell-tower reading. Critical: we
+            // only have ~30s of background time from the silent push, so
+            // the timeout is sized to leave room for the upload that follows.
             let location = try await LocationService.shared.fetchOnce()
             let city = await LocationService.reverseGeocode(location)
             try await APIClient.shared.uploadLocation(
@@ -95,7 +99,7 @@ final class PushService: NSObject, UNUserNotificationCenterDelegate {
                 city: city
             )
             #if DEBUG
-            print("[PushService] uploaded location for \(txId): \(location.coordinate), city: \(city ?? "?")")
+            print("[PushService] uploaded \(Int(location.horizontalAccuracy))m fix for \(txId) — city: \(city ?? "?")")
             #endif
             return .newData
         } catch {

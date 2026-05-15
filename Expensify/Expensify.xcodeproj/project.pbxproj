@@ -415,6 +415,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Expensify/Info.plist;
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Expensify tags transactions with where they happened. The 'Always' upgrade is what lets us briefly run in the background when a new transaction email arrives so we can capture an accurate GPS reading before the user moves.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Expensify tags transactions with where they happened, only when a new transaction email arrives.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -451,6 +452,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Expensify/Info.plist;
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Expensify tags transactions with where they happened. The 'Always' upgrade is what lets us briefly run in the background when a new transaction email arrives so we can capture an accurate GPS reading before the user moves.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Expensify tags transactions with where they happened, only when a new transaction email arrives.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

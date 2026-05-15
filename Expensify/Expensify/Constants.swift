@@ -6,8 +6,16 @@ import Foundation
 // nonisolated so the APIClient actor (off main) can read these without an
 // async hop. Both values are immutable `let`s — safe to share across actors.
 nonisolated enum Constants {
-    /// Railway production URL of the backend.
-    static let baseURL: URL = URL(string: "https://expensify-production.up.railway.app")!
+    /// Production URL of the backend.
+    ///
+    /// Why a custom domain instead of the Railway-provided
+    /// `expensify-production.up.railway.app`: Indian carriers (Jio /
+    /// Airtel / VI) silently DNS-filter the entire `*.up.railway.app`
+    /// TLD as part of their "safe browsing" rules, which made the iOS
+    /// app fail to reach the backend on cellular. Our own domain is
+    /// unfiltered. Railway routes by Host header, so this maps to the
+    /// same Fastify service in the same project.
+    static let baseURL: URL = URL(string: "https://expensify.sudhanva.space")!
 
     /// Static API token shared between iOS and backend. Generate any random
     /// 32+ char string. Set the *same* value on Railway as `API_TOKEN`.
