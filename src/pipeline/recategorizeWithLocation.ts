@@ -19,11 +19,9 @@
 // Called fire-and-forget from POST /transactions/:id/location so the location
 // upload returns 200 immediately — re-categorize runs in the background.
 //
-// Why no Groq here?  Places' `types[]` is already a structured signal — Italian
-// restaurant, gas station, transit station, etc. A static type→category map is
-// faster, cheaper (zero LLM calls), and deterministic. Groq remains the
-// fallback inside the main categorization tier chain; this path only fires
-// when we have a location and want to enrich an already-ingested row.
+// Places' `types[]` is already a structured signal — Italian restaurant,
+// gas station, transit station, etc. A static type→category map is faster,
+// cheaper, and deterministic. No LLM call needed.
 
 import { prisma } from '../db/client.js';
 import { buildOptionalPlacesClient } from '../services/places.js';

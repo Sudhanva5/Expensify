@@ -133,6 +133,39 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'Transaction not found' });
       }
 
+      // Pattern learning. When the user confirms a category (via swipe or
+      // edit-tag), record it against the merchant's normalized name so
+      // future transactions for the same merchant auto-tag after 3 hits.
+      // Best-effort: never blocks the response, never throws.
+      if (updates.categoryId) {
+        try {
+          const tx = await prisma.transaction.findUnique({
+            where: { id },
+            select: { merchantNormalized: true },
+          });
+          if (tx?.merchantNormalized) {
+            const { recordConfirmation } = await import(
+              '../../db/merchantPatterns.js'
+            );
+            const result = await recordConfirmation({
+              merchantNormalized: tx.merchantNormalized,
+              categoryId: updates.categoryId,
+            });
+            req.log.info(
+              {
+                merchant: tx.merchantNormalized,
+                hitCount: result.hitCount,
+                autoTagActive: result.autoTagActive,
+                categoryChanged: result.categoryChanged,
+              },
+              '[pattern-learning] recorded user confirmation',
+            );
+          }
+        } catch (err) {
+          req.log.warn({ err }, '[pattern-learning] failed to record confirmation');
+        }
+      }
+
       return { ok: true };
     },
   );
@@ -173,7 +206,7 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
         },
       });
 
-      // Fire-and-forget: now that we have lat/lng, run a Places + Groq pass
+      // Fire-and-forget: now that we have lat/lng, run a Places lookup pass
       // to resolve the actual merchant name and category. Logs the outcome
       // but never blocks the iOS upload response.
       void recategorizeWithLocation({

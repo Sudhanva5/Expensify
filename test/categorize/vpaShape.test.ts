@@ -18,8 +18,13 @@ describe('classifyVpa', () => {
     expect(classifyVpa('something@randomhandle')).toBe('unknown');
   });
 
-  it('returns unknown for purely numeric local on @paytm', () => {
-    expect(classifyVpa('9876543210@paytm')).toBe('unknown');
+  it('classifies phone-shaped local on a personal handle as personal', () => {
+    // Updated from the older "unknown" expectation. Phone numbers on
+    // consumer handles (e.g. `9876543210@paytm`, `9876543210@ybl`) are
+    // overwhelmingly personal accounts — the classifier was expanded to
+    // recognize this so we auto-tag P2P transfers correctly.
+    expect(classifyVpa('9876543210@paytm')).toBe('personal');
+    expect(classifyVpa('9876543210@ybl')).toBe('personal');
   });
 
   it('returns unknown for input without @', () => {

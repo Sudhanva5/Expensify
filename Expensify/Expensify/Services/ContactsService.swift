@@ -104,18 +104,23 @@ final class ContactsService {
 
     private func reload(using store: CNContactStore) async {
         await Task.detached(priority: .utility) {
-            // Pull thumbnail data in the initial enumeration. Doing this
-            // eagerly (vs. lazy-fetching per-render later) means:
-            //   • Main-thread render never blocks on Contacts I/O
-            //   • Every contact-matched row's photo is ready instantly
-            //   • Cost is bounded: ~4KB per contact thumbnail × ~500
-            //     contacts ≈ 2MB of memory. Fine for V1.
+            // Pull both thumbnail AND full image keys. Some contacts have
+            // only the full-resolution photo (no auto-generated thumbnail
+            // — this happens when the photo was attached via certain
+            // sync paths). Falling back to imageData here means we never
+            // miss a photo that exists.
+            //
+            // Cost is bounded: thumbnails are tiny (~4KB), full images
+            // are bigger (~50-200KB) but only loaded when no thumbnail
+            // exists. Typical iPhone has 200-500 contacts, ~5-10% with
+            // photos — peak memory still well under 10MB.
             let keysToFetch: [CNKeyDescriptor] = [
                 CNContactGivenNameKey as CNKeyDescriptor,
                 CNContactFamilyNameKey as CNKeyDescriptor,
                 CNContactPhoneNumbersKey as CNKeyDescriptor,
                 CNContactImageDataAvailableKey as CNKeyDescriptor,
                 CNContactThumbnailImageDataKey as CNKeyDescriptor,
+                CNContactImageDataKey as CNKeyDescriptor,
                 CNContactIdentifierKey as CNKeyDescriptor,
                 CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
             ]
@@ -124,6 +129,7 @@ final class ContactsService {
             var fetched: [Contact] = []
             var cnById: [String: CNContact] = [:]
             var photos: [String: Data] = [:]
+            var photoStats = (withThumb: 0, withFull: 0, available: 0)
             do {
                 try store.enumerateContacts(with: request) { cn, _ in
                     let formatter = CNContactFormatter()
@@ -142,8 +148,17 @@ final class ContactsService {
                     )
                     fetched.append(c)
                     cnById[cn.identifier] = cn
-                    if hasPhoto, let data = cn.thumbnailImageData {
-                        photos[cn.identifier] = data
+                    if hasPhoto {
+                        photoStats.available += 1
+                        if let data = cn.thumbnailImageData {
+                            photos[cn.identifier] = data
+                            photoStats.withThumb += 1
+                        } else if let data = cn.imageData {
+                            // Fall back to full image when no thumbnail
+                            // exists. iOS will downsample at render time.
+                            photos[cn.identifier] = data
+                            photoStats.withFull += 1
+                        }
                     }
                 }
             } catch {
@@ -158,6 +173,9 @@ final class ContactsService {
                 self.cnContactsById = cnById
                 self.indexByPhone = Self.buildPhoneIndex(from: fetched)
                 self.photoCache = photos
+                #if DEBUG
+                print("[ContactsService] indexed \(fetched.count) contacts; photos: \(photos.count) cached (\(photoStats.withThumb) thumb + \(photoStats.withFull) full); \(photoStats.available) marked imageDataAvailable")
+                #endif
             }
         }.value
     }

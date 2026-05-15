@@ -54,6 +54,23 @@ export async function categorize(
   const signals: CategorizationSignal[] = [];
   const vpaShape: VpaShape = tx.vpa ? classifyVpa(tx.vpa) : 'unknown';
 
+  // Pattern-learning shortcut — if the user has confirmed the SAME merchant
+  // tagged the SAME way ≥3 times, we auto-tag forever from then on. Highest
+  // confidence we emit. Runs before the alias table so user-trained
+  // categorization wins over our hard-coded mappings (the user knows their
+  // habits better than we do).
+  if (ctx.lookupMerchantPattern) {
+    const patternHit = await ctx.lookupMerchantPattern(merchantNormalized);
+    if (patternHit) {
+      signals.push({
+        source: 'merchant_pattern',
+        category: patternHit.category,
+        confidence: 0.99,
+        details: `Pattern: "${merchantNormalized}" → ${patternHit.category} (confirmed ${patternHit.hitCount}×)`,
+      });
+    }
+  }
+
   // Tier 0 — autopay shortcut
   if (tx.isAutopay) {
     const hit = lookupAutopayAlias(merchantNormalized, ctx.autopayAliases);
@@ -83,11 +100,20 @@ export async function categorize(
   }
 
   // Tier 2 — VPA shape
+  //
+  // Boosted to 0.95 (was 0.7) so personal-VPA transfers auto-tag as P2P
+  // without sitting in the review queue. The old 0.7 cap was "wait for the
+  // user to confirm" but in practice every UPI to a friend's personal
+  // handle is a P2P — confirming 50× in a row added zero signal value.
+  // False-positive risk: a small local merchant accepting a personal VPA
+  // gets tagged P2P. Acceptable — the user can re-tag in one swipe, and
+  // the merchant_patterns learning will move it to the right category
+  // after 3 corrections.
   if (vpaShape === 'personal') {
     signals.push({
       source: 'vpa_shape',
       category: 'Personal Transfer (Peer-to-Peer)',
-      confidence: 0.7,
+      confidence: 0.95,
       details: `VPA "${tx.vpa}" looks personal`,
     });
   }
@@ -110,42 +136,13 @@ export async function categorize(
     }
   }
 
-  // Tier 3 — Groq alone. Only call if no auto-tag-eligible signal already exists.
-  const hasAutoTag = signals.some(
-    (s) => s.confidence >= AUTO_TAG_CONFIDENCE_THRESHOLD,
-  );
-
-  const groqInputCommon = {
-    merchantRaw: tx.merchantRaw,
-    merchantNormalized,
-    vpa: tx.vpa,
-    amountInr:
-      tx.amountInrMinor !== null
-        ? Number(tx.amountInrMinor) / 100
-        : Number(tx.amountMinor) / 100,
-    occurredAt: tx.occurredAt,
-    direction: tx.direction,
-    instrument: tx.instrument,
-    isAutopay: tx.isAutopay,
-  };
-
-  if (ctx.groq && !hasAutoTag) {
-    const out = await ctx.groq.categorize(groqInputCommon);
-    if (out.category !== null) {
-      signals.push({
-        source: 'groq',
-        category: out.category,
-        confidence: out.confidence,
-        details: `Groq: ${out.rationale}`,
-      });
-    }
-  }
-
-  // Note: there used to be a Tier 4 here that grounded Groq with Brave Search
-  // results for unknown merchants. Removed — the live system instead uses
-  // Google Places via recategorizeWithLocation once iOS uploads GPS, which
-  // gives a much stronger signal (real business name + structured types)
-  // than scraping search snippets ever did.
+  // Note: this used to run two more tiers — Groq (Tier 3, LLM call with
+  // merchant + amount + time) and Brave Search → Groq (Tier 4, grounded
+  // by web snippets). Both removed. Groq was never configured in
+  // production and added an LLM dependency we didn't need; Places +
+  // alias + pattern-learning + VPA shape covers the actual catchable
+  // cases. The fallback for unknown merchants is the review queue,
+  // which the merchant_patterns layer learns from over time.
 
   const picked = pickHighestConfidence(signals);
   const status =

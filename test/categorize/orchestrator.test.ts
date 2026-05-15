@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { categorize } from '../../src/categorize/index.js';
 import {
   ROUTING_PREFIXES,
@@ -9,11 +9,6 @@ import type {
   CategorizeContext,
   UserRule,
 } from '../../src/categorize/types.js';
-import type {
-  GroqCategorizer,
-  GroqCategorizeInput,
-  GroqCategorizeOutput,
-} from '../../src/categorize/groq.js';
 import { makeTx, istDate } from '../_helpers/makeTx.js';
 
 const baseCtx: CategorizeContext = {
@@ -22,23 +17,6 @@ const baseCtx: CategorizeContext = {
   routingPrefixes: ROUTING_PREFIXES,
   rules: [],
 };
-
-// Mock Groq that returns a canned response and tracks calls.
-function mockGroq(
-  out: GroqCategorizeOutput,
-): GroqCategorizer & {
-  calls: { count: number; lastInput: GroqCategorizeInput | null };
-} {
-  const state = { count: 0, lastInput: null as GroqCategorizeInput | null };
-  return {
-    calls: state,
-    async categorize(input: GroqCategorizeInput) {
-      state.count++;
-      state.lastInput = input;
-      return out;
-    },
-  };
-}
 
 describe('categorize — alias path', () => {
   it('auto-resolves BUNDL TECHNOLOGIES as Food', async () => {
@@ -92,19 +70,23 @@ describe('categorize — autopay shortcut', () => {
 });
 
 describe('categorize — VPA shape path', () => {
-  it('suggests Personal Transfer for SNEHA personal VPA, but needs review', async () => {
+  it('auto-resolves outbound to a personal VPA as P2P', async () => {
+    // Updated assertion: VPA-shape confidence was boosted from 0.7 to 0.95
+    // so personal-VPA outbound transfers auto-tag without needing user
+    // confirmation. UPI credits hit a separate fast-path (handled in the
+    // dedicated test below), so we exercise outbound here.
     const result = await categorize(
       makeTx({
-        direction: 'in',
+        direction: 'out',
         merchantRaw: 'SNEHA R',
         vpa: 's.neha2003rajesh-1@okaxis',
       }),
       baseCtx,
     );
-    expect(result.status).toBe('needs_review');
+    expect(result.status).toBe('auto_resolved');
     expect(result.picked?.source).toBe('vpa_shape');
     expect(result.picked?.category).toBe('Personal Transfer (Peer-to-Peer)');
-    expect(result.picked?.confidence).toBe(0.7);
+    expect(result.picked?.confidence).toBe(0.95);
   });
 
   it('produces no signal for unknown kirana with merchant VPA (without Groq)', async () => {
@@ -139,7 +121,16 @@ describe('categorize — user rule engine', () => {
     },
   };
 
-  it('fires the cab rule for the canonical Uber-driver scenario', async () => {
+  it('fires the cab rule but VPA-shape wins (auto-tags as P2P)', async () => {
+    // Updated for the new VPA-shape confidence (0.95). Both signals
+    // still fire — the cab rule emits its 0.6-confidence Travel
+    // suggestion, and the VPA shape emits 0.95 P2P. P2P wins on
+    // confidence and the row auto-resolves.
+    //
+    // Trade-off: cab rules can no longer "convert" a P2P-looking
+    // transfer into Travel automatically. The user has to re-tag
+    // the first ~3 cab rides manually; merchant_patterns learning
+    // then auto-tags that driver's VPA as Travel from then on.
     const result = await categorize(
       makeTx({
         direction: 'out',
@@ -151,9 +142,10 @@ describe('categorize — user rule engine', () => {
       { ...baseCtx, rules: [uberRule] },
     );
 
-    expect(result.status).toBe('needs_review');
+    expect(result.status).toBe('auto_resolved');
     expect(result.signals.some((s) => s.source === 'user_rule')).toBe(true);
-    expect(result.picked?.source).toBe('vpa_shape'); // 0.7 > rule's 0.6
+    expect(result.picked?.source).toBe('vpa_shape');
+    expect(result.picked?.confidence).toBe(0.95);
   });
 
   it('rule does not fire for known alias merchant', async () => {
@@ -221,94 +213,4 @@ describe('categorize — pick logic', () => {
   });
 });
 
-describe('categorize — Tier 3 (Groq)', () => {
-  it('calls Groq when no auto-tag signal fires (unknown kirana)', async () => {
-    const groq = mockGroq({
-      category: 'Groceries / Kirana Stores',
-      confidence: 0.82,
-      rationale: 'ENTERPRISES suffix and small amount suggest a kirana store',
-    });
-
-    const result = await categorize(
-      makeTx({
-        merchantRaw: 'SRI GURU RAGHAVENDRA ENTERPRISES',
-        vpa: 'q201985284@ybl',
-        amountMinor: 9400n,
-      }),
-      { ...baseCtx, groq },
-    );
-
-    expect(groq.calls.count).toBe(1);
-    expect(result.signals.some((s) => s.source === 'groq')).toBe(true);
-    expect(result.picked?.source).toBe('groq');
-    expect(result.picked?.category).toBe('Groceries / Kirana Stores');
-    expect(result.status).toBe('needs_review'); // 0.82 < 0.95 threshold
-  });
-
-  it('skips Groq when an alias has already auto-tagged', async () => {
-    const groq = mockGroq({
-      category: 'Food',
-      confidence: 0.9,
-      rationale: 'should not be called',
-    });
-
-    const result = await categorize(
-      makeTx({ merchantRaw: 'BUNDL TECHNOLOGIES' }),
-      { ...baseCtx, groq },
-    );
-
-    expect(groq.calls.count).toBe(0);
-    expect(result.picked?.source).toBe('alias');
-    expect(result.status).toBe('auto_resolved');
-  });
-
-  it('still calls Groq when only a low-confidence VPA-shape signal exists', async () => {
-    const groq = mockGroq({
-      category: 'Personal Transfer (Peer-to-Peer)',
-      confidence: 0.85,
-      rationale: 'corroborates personal VPA',
-    });
-
-    const result = await categorize(
-      makeTx({
-        merchantRaw: 'SNEHA R',
-        vpa: 's.neha2003rajesh-1@okaxis',
-        direction: 'in',
-      }),
-      { ...baseCtx, groq },
-    );
-
-    expect(groq.calls.count).toBe(1);
-    // Both signals (VPA 0.7 and Groq 0.85) — Groq wins
-    expect(result.picked?.source).toBe('groq');
-    expect(result.picked?.confidence).toBe(0.85);
-  });
-
-  it('drops Groq signal when category is null', async () => {
-    const groq = mockGroq({
-      category: null,
-      confidence: 0,
-      rationale: 'cannot determine',
-    });
-
-    const result = await categorize(
-      makeTx({ merchantRaw: 'TOTALLY UNKNOWN' }),
-      { ...baseCtx, groq },
-    );
-
-    expect(groq.calls.count).toBe(1);
-    expect(result.signals.find((s) => s.source === 'groq')).toBeUndefined();
-    expect(result.picked).toBeNull();
-  });
-
-  it('does not crash when Groq throws — wraps cleanly via mock spy', async () => {
-    const groq: GroqCategorizer = {
-      categorize: vi.fn().mockRejectedValue(new Error('groq down')),
-    };
-
-    await expect(
-      categorize(makeTx({ merchantRaw: 'UNKNOWN' }), { ...baseCtx, groq }),
-    ).rejects.toThrow('groq down');
-  });
-});
 

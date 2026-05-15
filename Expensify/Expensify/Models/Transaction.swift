@@ -47,7 +47,6 @@ struct Transaction: Identifiable, Hashable {
         case vpaShape = "vpa_shape"
         case userRule = "user_rule"
         case merchantPattern = "merchant_pattern"
-        case groq
         /// Set by the backend's recategorizeWithLocation step — means we
         /// looked up nearby Google Places and one of them mapped to a V1
         /// category via the static type map. This is the only signal source
@@ -62,7 +61,6 @@ struct Transaction: Identifiable, Hashable {
             case .vpaShape: return "VPA pattern"
             case .userRule: return "Your rule"
             case .merchantPattern: return "Past tagging"
-            case .groq: return "AI suggestion"
             case .places: return "Nearby place"
             }
         }

@@ -16,10 +16,6 @@ import { authorizedClient } from '../../gmail/oauth.js';
 import { processGmailMessage } from '../../pipeline/processGmailMessage.js';
 import { buildCategorizeContextFromDb } from '../../db/categorizeContext.js';
 import { requestLocationFromAllDevices } from '../../services/apns.js';
-import {
-  HttpGroqCategorizer,
-  type GroqCategorizer,
-} from '../../categorize/groq.js';
 
 const tokenVerifier = new OAuth2Client();
 
@@ -41,12 +37,6 @@ async function verifyPubsubJwt(req: FastifyRequest): Promise<boolean> {
     req.log.warn({ err }, 'Pub/Sub JWT verification failed');
     return false;
   }
-}
-
-function buildOptionalGroq(): GroqCategorizer | undefined {
-  const key = process.env['GROQ_API_KEY'];
-  if (!key) return undefined;
-  return new HttpGroqCategorizer({ apiKey: key });
 }
 
 export async function gmailWebhookRoute(app: FastifyInstance): Promise<void> {
@@ -90,9 +80,7 @@ export async function gmailWebhookRoute(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    const ctx = await buildCategorizeContextFromDb({
-      ...(buildOptionalGroq() ? { groq: buildOptionalGroq()! } : {}),
-    });
+    const ctx = await buildCategorizeContextFromDb();
 
     for (const msg of messages) {
       const outcome = await processGmailMessage(msg, ctx);

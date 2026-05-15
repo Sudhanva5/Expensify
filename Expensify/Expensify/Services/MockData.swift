@@ -160,7 +160,6 @@ enum MockData {
                 case .vpaShape: detail = "VPA looks personal"
                 case .alias, .autopayAlias: detail = "Known merchant"
                 case .merchantPattern: detail = "Tagged this 3+ times"
-                case .groq: detail = "AI suggestion"
                 case .places: detail = "Nearby place"
                 case .none: detail = nil
                 }

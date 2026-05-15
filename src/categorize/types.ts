@@ -17,7 +17,6 @@ export type SignalSource =
   | 'vpa_shape'
   | 'user_rule'
   | 'merchant_pattern'
-  | 'groq'
   // Set by recategorizeWithLocation after iOS uploads GPS and a nearby
   // Place's types map to one of our V1 categories. This is the *only*
   // signal source where merchantNormalized comes from Google Places.
@@ -105,8 +104,13 @@ export interface CategorizeContext {
   autopayAliases: AutopayAliasEntry[];
   routingPrefixes: string[];
   rules: UserRule[];
-  // Optional Tier 3 — when undefined, Groq step is skipped entirely.
-  groq?: import('./groq.js').GroqCategorizer;
+  // Optional pattern-learning lookup. When provided, categorize() checks
+  // for an active pattern (≥3 user confirmations of the same merchant →
+  // category) before running the rest of the tiers. Hit → auto-tag with
+  // very high confidence. Injected from the DB by buildCategorizeContextFromDb.
+  lookupMerchantPattern?: (
+    merchantNormalized: string,
+  ) => Promise<{ category: CategoryName; hitCount: number } | null>;
 }
 
 export interface Enrichment {
