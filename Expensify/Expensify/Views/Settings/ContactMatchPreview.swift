@@ -1,19 +1,24 @@
 import SwiftUI
 
 /// Pushed from Settings → Contacts → "view recent matches". For the last
-/// ~30 outbound UPI transactions, shows which contact (if any) we
-/// matched and whether their photo is cached. Diagnostic only — lets
-/// the user answer "why does this row show initials instead of a photo?"
-/// without diving into Xcode console.
+/// ~30 outbound UPI transactions, shows BOTH match paths the avatar can
+/// use AND which one actually supplied the photo on screen:
 ///
-/// Three possible per-row states:
-///   • no match       — payee doesn't resolve to a contact (no phone in
-///                       VPA, name too short or ambiguous)
-///   • matched, photo — contact found AND has cached photo data
-///   • matched, ——   — contact found but no photo in user's address book
+///   • LOCAL  — iPhone CNContactStore match (private; never leaves device)
+///   • GOOGLE — backend cache populated via People API (synced contacts)
+///   • PHOTO SOURCE — which of the above was used by the avatar (or "—")
+///
+/// This is the answer to "why does the row show a photo even though
+/// the diagnostic says no match?" — usually because LOCAL missed but
+/// GOOGLE hit. Lets you reason about the system without guessing.
 struct ContactMatchPreview: View {
     @Environment(TransactionStore.self) private var store
     @Environment(ContactsService.self) private var contactsService
+
+    /// Mirrors what `ContactsService.fetchGooglePhotoIfNeeded(for:)`
+    /// would cache after iOS scrolls the home list. Re-runs on appear
+    /// so the diagnostic stays current; idempotent.
+    @State private var googleFetchRan: Bool = false
 
     private var p2pCandidates: [Transaction] {
         store.transactions
@@ -46,6 +51,18 @@ struct ContactMatchPreview: View {
         }
         .navigationTitle("contact matches")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            // Fire the Google lookup for every candidate once when the
+            // diagnostic opens. Without this, the "GOOGLE" column would
+            // show stale state — fetchGooglePhotoIfNeeded is normally
+            // triggered by row appearance in the home list, not here.
+            // Idempotent + per-VPA debounced inside ContactsService.
+            guard !googleFetchRan else { return }
+            googleFetchRan = true
+            for tx in p2pCandidates {
+                await contactsService.fetchGooglePhotoIfNeeded(for: tx)
+            }
+        }
     }
 
     @ViewBuilder
@@ -55,20 +72,25 @@ struct ContactMatchPreview: View {
             HStack {
                 Text("rows scanned")
                 Spacer()
-                Text("\(totals.scanned)")
-                    .foregroundStyle(AppColor.textTertiary)
+                Text("\(totals.scanned)").foregroundStyle(AppColor.textTertiary)
             }
             HStack {
-                Text("matched")
+                Text("local matches")
                 Spacer()
-                Text("\(totals.matched)")
-                    .foregroundStyle(totals.matched > 0 ? AppColor.inflow : AppColor.textTertiary)
+                Text("\(totals.localMatched) (\(totals.localWithPhoto) with photo)")
+                    .foregroundStyle(totals.localMatched > 0 ? AppColor.inflow : AppColor.textTertiary)
             }
             HStack {
-                Text("of which have photo")
+                Text("google matches")
                 Spacer()
-                Text("\(totals.withPhoto)")
-                    .foregroundStyle(totals.withPhoto > 0 ? AppColor.inflow : AppColor.textTertiary)
+                Text("\(totals.googleMatched) (\(totals.googleWithPhoto) with photo)")
+                    .foregroundStyle(totals.googleMatched > 0 ? AppColor.inflow : AppColor.textTertiary)
+            }
+            HStack {
+                Text("avatar showing photo")
+                Spacer()
+                Text("\(totals.avatarHasPhoto) of \(totals.scanned)")
+                    .foregroundStyle(totals.avatarHasPhoto > 0 ? AppColor.inflow : AppColor.textTertiary)
             }
         }
         .font(.system(size: 14))
@@ -77,59 +99,128 @@ struct ContactMatchPreview: View {
 
     @ViewBuilder
     private func row(for tx: Transaction) -> some View {
-        let contact = contactsService.match(for: tx)
-        let hasPhoto = contact.map { contactsService.hasCachedPhoto($0) } ?? false
+        let local = contactsService.match(for: tx)
+        let localHasPhoto = local.map { contactsService.hasCachedPhoto($0) } ?? false
+        let googleName = tx.vpa.flatMap { contactsService.googleDisplayName(for: $0) }
+        let googlePhoto = tx.vpa.flatMap { contactsService.googlePhotoData(for: $0) }
+        let avatarPhoto = contactsService.bestPhotoData(for: tx)
 
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(tx.merchantRaw)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(AppColor.textPrimary)
-                    .lineLimit(1)
-                if let vpa = tx.vpa {
-                    Text(vpa)
-                        .font(AppFont.caption.monospaced())
-                        .foregroundStyle(AppColor.textTertiary)
-                        .lineLimit(1)
-                }
+        // Which path actually fed the avatar on the home screen?
+        let photoSource: String = {
+            if let avatarPhoto, let local, contactsService.hasCachedPhoto(local),
+               contactsService.imageData(for: local) == avatarPhoto {
+                return "local"
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                if let contact {
-                    HStack(spacing: 4) {
-                        Image(systemName: hasPhoto ? "photo.fill" : "photo")
-                            .font(.system(size: 11))
-                            .foregroundStyle(hasPhoto ? AppColor.inflow : AppColor.textTertiary)
-                        Text(contact.displayName)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(AppColor.textPrimary)
+            if avatarPhoto != nil && googlePhoto != nil { return "google" }
+            if avatarPhoto != nil { return "local" }
+            return "—"
+        }()
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(tx.merchantRaw)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(AppColor.textPrimary)
+                        .lineLimit(1)
+                    if let vpa = tx.vpa {
+                        Text(vpa)
+                            .font(AppFont.caption.monospaced())
+                            .foregroundStyle(AppColor.textTertiary)
                             .lineLimit(1)
                     }
-                    Text(hasPhoto ? "matched · photo cached" : "matched · no photo")
-                        .font(AppFont.caption)
-                        .foregroundStyle(AppColor.textTertiary)
-                } else {
-                    Text("no match")
-                        .font(.system(size: 13))
-                        .foregroundStyle(AppColor.textTertiary)
                 }
+                Spacer()
+                Text("photo: \(photoSource)")
+                    .font(AppFont.caption.monospaced())
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        photoSource == "—"
+                            ? AppColor.avatarFill
+                            : AppColor.inflow.opacity(0.18)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .foregroundStyle(photoSource == "—" ? AppColor.textTertiary : AppColor.textPrimary)
+            }
+            HStack(spacing: 6) {
+                pathBadge(
+                    label: "LOCAL",
+                    name: local?.displayName,
+                    hasPhoto: localHasPhoto
+                )
+                pathBadge(
+                    label: "GOOGLE",
+                    name: googleName,
+                    hasPhoto: googlePhoto != nil
+                )
             }
         }
         .padding(.vertical, 4)
     }
 
-    private func computeSummary() -> (scanned: Int, matched: Int, withPhoto: Int) {
-        var matched = 0
-        var withPhoto = 0
-        for tx in p2pCandidates {
-            if let contact = contactsService.match(for: tx) {
-                matched += 1
-                if contactsService.hasCachedPhoto(contact) {
-                    withPhoto += 1
-                }
+    /// Compact "PATH · name · 📷" badge so the user can see at a glance
+    /// which of the two match paths fired for this row.
+    @ViewBuilder
+    private func pathBadge(label: String, name: String?, hasPhoto: Bool) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 9, weight: .bold).monospaced())
+                .foregroundStyle(AppColor.textTertiary)
+            if let name {
+                Image(systemName: hasPhoto ? "photo.fill" : "photo")
+                    .font(.system(size: 10))
+                    .foregroundStyle(hasPhoto ? AppColor.inflow : AppColor.textTertiary)
+                Text(name)
+                    .font(AppFont.caption)
+                    .foregroundStyle(AppColor.textPrimary)
+                    .lineLimit(1)
+            } else {
+                Text("no match")
+                    .font(AppFont.caption)
+                    .foregroundStyle(AppColor.textTertiary)
             }
         }
-        return (scanned: p2pCandidates.count, matched: matched, withPhoto: withPhoto)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(AppColor.avatarFill)
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+    }
+
+    private func computeSummary() -> (
+        scanned: Int,
+        localMatched: Int,
+        localWithPhoto: Int,
+        googleMatched: Int,
+        googleWithPhoto: Int,
+        avatarHasPhoto: Int
+    ) {
+        var localMatched = 0
+        var localWithPhoto = 0
+        var googleMatched = 0
+        var googleWithPhoto = 0
+        var avatarHasPhoto = 0
+        for tx in p2pCandidates {
+            if let contact = contactsService.match(for: tx) {
+                localMatched += 1
+                if contactsService.hasCachedPhoto(contact) { localWithPhoto += 1 }
+            }
+            if let vpa = tx.vpa {
+                if contactsService.googleDisplayName(for: vpa) != nil {
+                    googleMatched += 1
+                    if contactsService.googlePhotoData(for: vpa) != nil { googleWithPhoto += 1 }
+                }
+            }
+            if contactsService.bestPhotoData(for: tx) != nil { avatarHasPhoto += 1 }
+        }
+        return (
+            scanned: p2pCandidates.count,
+            localMatched: localMatched,
+            localWithPhoto: localWithPhoto,
+            googleMatched: googleMatched,
+            googleWithPhoto: googleWithPhoto,
+            avatarHasPhoto: avatarHasPhoto
+        )
     }
 }
 
