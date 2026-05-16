@@ -4,6 +4,7 @@
 //
 //   npx tsx scripts/refresh-places-by-vpa.ts --vpa "<exact-or-substring>"
 //   npx tsx scripts/refresh-places-by-vpa.ts --merchant "SURENDRA SHETTY"
+//   npx tsx scripts/refresh-places-by-vpa.ts --all
 //
 // Idempotent — overwrites placesSuggestions on each matching row. Does
 // NOT touch categoryId / status / signalSource, so user-tagged rows
@@ -25,8 +26,9 @@ const STRICT_DISTANCE_M = 20;
 async function main() {
   const vpaFilter = getArg('vpa');
   const merchantFilter = getArg('merchant');
-  if (!vpaFilter && !merchantFilter) {
-    console.error('Usage: refresh-places-by-vpa.ts --vpa <substr> [or --merchant <substr>]');
+  const allFlag = process.argv.includes('--all');
+  if (!vpaFilter && !merchantFilter && !allFlag) {
+    console.error('Usage: refresh-places-by-vpa.ts --vpa <substr> | --merchant <substr> | --all');
     process.exit(2);
   }
 
