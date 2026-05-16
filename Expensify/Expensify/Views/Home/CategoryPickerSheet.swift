@@ -29,11 +29,12 @@ struct CategoryPickerSheet: View {
     /// every successful pick so the sheet shows the current state.
     @State private var pinnedName: String?
 
-    /// True when this row is eligible for a contact pin. UPI debit from
-    /// a bank account whose VPA isn't a merchant Q-code (those are shops,
-    /// not people, so no contact-overlay makes sense).
+    /// True when this row is eligible for a contact pin. Any UPI flow
+    /// from a bank account — inbound OR outbound — whose VPA isn't a
+    /// merchant Q-code. A ₹1 inbound from Bivek and a ₹1 outbound to
+    /// Bivek are the same person; the user wants to pin either side.
+    /// (Merchant Q-codes are shops, no person to attach.)
     private var canPinContact: Bool {
-        guard transaction.direction == .out else { return false }
         guard transaction.instrument.hasPrefix("account_") else { return false }
         guard let vpa = transaction.vpa, !vpa.isEmpty else { return false }
         return !ContactsService.isMerchantVpaPublic(vpa)

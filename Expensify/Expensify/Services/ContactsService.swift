@@ -349,7 +349,11 @@ final class ContactsService {
     /// (`account_*` instrument). Credit-card transactions to a name look
     /// like personal transfers but are actually tips/services.
     func match(for transaction: Transaction) -> Contact? {
-        guard transaction.direction == .out else { return nil }
+        // UPI from-account flows in BOTH directions are person-to-person.
+        // Outbound = you paying a friend; inbound = a friend paying you.
+        // Both rows benefit from the same name + photo overlay.
+        // (Credit-card debits skip — those are merchant purchases,
+        // contact overlay doesn't apply.)
         guard transaction.instrument.hasPrefix("account_") else { return nil }
 
         // --- Pass -1: user-pinned override -------------------------------
@@ -556,7 +560,10 @@ final class ContactsService {
     /// sets. Safe to call from row onAppear; the request is debounced
     /// per VPA.
     func fetchGooglePhotoIfNeeded(for tx: Transaction) async {
-        guard tx.direction == .out else { return }
+        // Both outbound and inbound UPI from-account flows are P2P.
+        // Skip merchant payments and credit-card rows below; direction
+        // is no longer part of the filter.
+        guard tx.instrument.hasPrefix("account_") else { return }
         guard let vpa = tx.vpa, !vpa.isEmpty else { return }
         // Merchant VPAs are shops — never overlay a contact identity on
         // them, even if Google has a contact whose name is a substring

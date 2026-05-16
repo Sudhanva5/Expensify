@@ -368,6 +368,32 @@ actor APIClient {
         )
     }
 
+    /// Edit an existing rule — used by the rule-row tap → editor flow.
+    /// Patches name + category + conditions in a single call. Confidence
+    /// and priority are left alone (the editor doesn't surface them and
+    /// shouldn't silently overwrite). Mirrors createRule's wire-format
+    /// choice (plainEncoder so the JSONB condition keys stay camelCase).
+    func updateRule(
+        id: String,
+        name: String,
+        category: Category,
+        conditions: UserRule.Conditions
+    ) async throws {
+        struct Body: Encodable {
+            let name: String
+            let category: String
+            let conditions: UserRule.Conditions
+        }
+        let body = Body(name: name, category: category.rawValue, conditions: conditions)
+        var req = URLRequest(url: Constants.baseURL.appendingPathComponent("/rules/\(id)"))
+        req.httpMethod = "PATCH"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try plainEncoder.encode(body)
+        let (data, http) = try await HTTPClient.shared.send(req)
+        try ensure2xx(http: http, data: data)
+    }
+
     /// Flip enabled on an existing rule. Used by the manage-rules toggle.
     func setRuleEnabled(id: String, enabled: Bool) async throws {
         struct Body: Encodable { let enabled: Bool }

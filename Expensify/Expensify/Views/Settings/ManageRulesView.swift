@@ -1,14 +1,22 @@
 import SwiftUI
 
-/// Settings → Rules. Lists every user-authored rule with a one-tap
-/// enable/disable toggle and swipe-to-delete. No edit-in-place yet —
-/// V1 keeps creation flow-gated through the "create rule from this
-/// transaction" wizard so conditions stay grounded in real data.
+/// Settings → Rules. Lists every user-authored rule.
+///
+/// Per-row interactions:
+///   • Tap                → edit the rule (RuleEditorSheet pre-filled)
+///   • Toggle             → enable/disable without leaving the list
+///   • Swipe-to-delete    → remove
+///   • Toolbar "+"        → create a new rule from scratch
 struct ManageRulesView: View {
     @State private var rules: [UserRule] = []
     @State private var loadState: LoadState = .idle
     @State private var loadError: String?
     @State private var showEditor: Bool = false
+    /// When non-nil, presents RuleEditorSheet pre-filled with this rule.
+    /// Lives separately from `showEditor` (which is the new-rule path)
+    /// so the same sheet API can serve both flows without a state-machine
+    /// collision.
+    @State private var editingRule: UserRule?
 
     enum LoadState { case idle, loading, loaded }
 
@@ -23,10 +31,15 @@ struct ManageRulesView: View {
             } else {
                 List {
                     ForEach(rules) { rule in
-                        RuleRow(
-                            rule: rule,
-                            onToggle: { isOn in Task { await toggle(rule, on: isOn) } }
-                        )
+                        Button {
+                            editingRule = rule
+                        } label: {
+                            RuleRow(
+                                rule: rule,
+                                onToggle: { isOn in Task { await toggle(rule, on: isOn) } }
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
                     .onDelete(perform: deleteAt)
                 }
@@ -60,6 +73,14 @@ struct ManageRulesView: View {
                 Task { await load() }
             })
         }
+        .sheet(item: $editingRule) { rule in
+            RuleEditorSheet(
+                editing: rule,
+                onSaved: {
+                    Task { await load() }
+                }
+            )
+        }
     }
 
     @ViewBuilder
@@ -71,7 +92,7 @@ struct ManageRulesView: View {
             Text("no rules yet")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(AppColor.textPrimary)
-            Text("tap 'create rule from this transaction' in the category picker to teach the system a new pattern.")
+            Text("tap '+' to create a contextual rule — e.g. ₹100-500 near your office on weekdays → Travel.")
                 .font(AppFont.caption)
                 .foregroundStyle(AppColor.textTertiary)
                 .multilineTextAlignment(.center)

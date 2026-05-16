@@ -11,6 +11,10 @@ import CoreLocation
 /// regex, and VPA-shape conditions live in the JSONB column and can be
 /// added by editing the rule directly in the DB if the user needs them.
 struct RuleEditorSheet: View {
+    /// Existing rule to edit. When nil the sheet creates a new rule.
+    /// When set the sheet pre-fills every toggle/field from the rule
+    /// and PATCHes /rules/:id on save instead of POSTing /rules.
+    var editing: UserRule? = nil
     /// Fires after a successful save so the parent list can refresh.
     var onSaved: () -> Void
 
@@ -31,6 +35,7 @@ struct RuleEditorSheet: View {
     @State private var locating: Bool = false
     @State private var saving: Bool = false
     @State private var saveError: String?
+    @State private var hydrated: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -133,7 +138,7 @@ struct RuleEditorSheet: View {
                 .scrollContentBackground(.hidden)
                 .background(AppColor.canvas)
             }
-            .navigationTitle("new rule")
+            .navigationTitle(editing == nil ? "new rule" : "edit rule")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -146,7 +151,50 @@ struct RuleEditorSheet: View {
                         .disabled(saving || name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
+            .onAppear { hydrateIfNeeded() }
         }
+    }
+
+    /// Pre-fill every field from `editing` exactly once. Idempotent
+    /// across redraws via the `hydrated` flag — without it, SwiftUI's
+    /// state model would overwrite the user's in-flight edits whenever
+    /// the body re-evaluates.
+    private func hydrateIfNeeded() {
+        guard !hydrated, let rule = editing else { return }
+        hydrated = true
+        name = rule.name
+        category = rule.category
+        let c = rule.conditions
+        if let amt = c.amountBetween, amt.count == 2 {
+            useAmount = true
+            amountLow = amt[0]
+            amountHigh = amt[1]
+        } else {
+            useAmount = false
+        }
+        if let t = c.timeOfDayBetween, t.count == 2 {
+            useTime = true
+            startTime = Self.parseHHMM(t[0]) ?? startTime
+            endTime = Self.parseHHMM(t[1]) ?? endTime
+        } else {
+            useTime = false
+        }
+        if let loc = c.locationWithinRadius {
+            useLocation = true
+            latText = String(format: "%.6f", loc.lat)
+            lngText = String(format: "%.6f", loc.lng)
+            radiusMeters = loc.meters
+        } else {
+            useLocation = false
+        }
+    }
+
+    private static func parseHHMM(_ s: String) -> Date? {
+        let parts = s.split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 2 else { return nil }
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "Asia/Kolkata") ?? .current
+        return c.date(bySettingHour: parts[0], minute: parts[1], second: 0, of: Date())
     }
 
     private func captureCurrentLocation() async {
@@ -206,13 +254,22 @@ struct RuleEditorSheet: View {
         }
 
         do {
-            _ = try await APIClient.shared.createRule(
-                name: name.trimmingCharacters(in: .whitespaces),
-                category: category,
-                conditions: conditions,
-                priority: 100,
-                confidence: 0.95
-            )
+            if let existing = editing {
+                try await APIClient.shared.updateRule(
+                    id: existing.id,
+                    name: name.trimmingCharacters(in: .whitespaces),
+                    category: category,
+                    conditions: conditions
+                )
+            } else {
+                _ = try await APIClient.shared.createRule(
+                    name: name.trimmingCharacters(in: .whitespaces),
+                    category: category,
+                    conditions: conditions,
+                    priority: 100,
+                    confidence: 0.95
+                )
+            }
             onSaved()
             dismiss()
         } catch {
