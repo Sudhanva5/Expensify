@@ -31,7 +31,12 @@ import {
   PLACES_TYPE_CONFIDENCE,
 } from '../services/placesTypeMapper.js';
 import { detectOnlineMerchant } from '../categorize/onlineMerchant.js';
+import { evaluateRule } from '../categorize/rules.js';
+import { classifyVpa } from '../categorize/vpaShape.js';
+import { listEnabledRules } from '../db/userRules.js';
 import { checkBudgetForCategory } from './budgetAlerts.js';
+import { AUTO_TAG_CONFIDENCE_THRESHOLD } from '../categorize/types.js';
+import type { ParsedTransaction } from '../parsers/hdfc/index.js';
 
 export type RecategorizeOutcome =
   | {
@@ -79,6 +84,19 @@ export async function recategorizeWithLocation(opts: {
       reason: `online_merchant_${onlineCheck.reason}`,
     };
   }
+
+  // Re-evaluate user rules with location context. Rules can carry a
+  // `locationWithinRadius` condition (e.g. "near my office") that's
+  // impossible to evaluate at ingest. Now that we have the iPhone's
+  // GPS, walk through rules priority-first and apply any that fire
+  // at auto-tag confidence (≥0.95). User rules beat Places matching
+  // because user intent is more reliable than nearby-shop guesses.
+  const ruleHit = await tryApplyLocationAwareRule({
+    tx,
+    lat: opts.lat,
+    lng: opts.lng,
+  });
+  if (ruleHit) return ruleHit;
 
   // Ask Places for a 20m sample so the haversine filter at STRICT_DISTANCE_M
   // has enough candidates to choose from. Auto-tag still requires single-
@@ -195,6 +213,109 @@ export async function recategorizeWithLocation(opts: {
     confidence: match.confidence,
     matchedPlacesType: match.matchedType,
   };
+}
+
+/**
+ * Walk enabled user rules that carry a `locationWithinRadius` condition,
+ * pick the highest-priority match, and apply it. Only rules with confidence
+ * ≥ AUTO_TAG_CONFIDENCE_THRESHOLD auto-tag here — anything lower is left
+ * for the Places pass / review queue to handle.
+ *
+ * Pattern: the "near my office → Travel" rule. User stands in front of the
+ * office, pays a Rapido rider ₹250 to a random personal VPA. No alias
+ * matches, no merchant fingerprint exists yet — but the geo+amount+time
+ * shape says "cab fare" with high confidence.
+ */
+async function tryApplyLocationAwareRule(opts: {
+  tx: {
+    id: string;
+    direction: 'in' | 'out';
+    instrument: string;
+    amountMinor: bigint;
+    currency: string;
+    amountInrMinor: bigint | null;
+    merchantRaw: string;
+    vpa: string | null;
+    occurredAt: Date;
+    signalSource: string | null;
+    locationLat: Prisma.Decimal | null;
+    locationLng: Prisma.Decimal | null;
+  };
+  lat: number;
+  lng: number;
+}): Promise<RecategorizeOutcome | null> {
+  const rules = await listEnabledRules();
+  const locationRules = rules.filter(
+    (r) => r.conditions.locationWithinRadius !== undefined,
+  );
+  if (locationRules.length === 0) return null;
+
+  // evaluateRule expects a ParsedTransaction; the DB row carries the same
+  // fields plus a few extras. Build a minimal compatible object — the
+  // evaluator only reads direction/instrument/amount/time/merchant/vpa.
+  const parsedLike: ParsedTransaction = {
+    template: 'upi_debit',
+    direction: opts.tx.direction,
+    instrument: opts.tx.instrument,
+    amountMinor: opts.tx.amountMinor,
+    currency: opts.tx.currency,
+    amountInrMinor: opts.tx.amountInrMinor,
+    bankConvertedRate: null,
+    merchantRaw: opts.tx.merchantRaw,
+    vpa: opts.tx.vpa,
+    occurredAt: opts.tx.occurredAt,
+    externalRef: null,
+    isAutopay: false,
+  };
+
+  const ctx = {
+    aliasMatched: opts.tx.signalSource === 'alias',
+    vpaShape: opts.tx.vpa ? classifyVpa(opts.tx.vpa) : ('unknown' as const),
+    txLat: opts.lat,
+    txLng: opts.lng,
+  };
+
+  // listEnabledRules already returns rows sorted by priority desc; take the
+  // first matching rule that fires at auto-tag confidence.
+  for (const rule of locationRules) {
+    if (!evaluateRule(rule, parsedLike, ctx)) continue;
+    if (rule.confidence < AUTO_TAG_CONFIDENCE_THRESHOLD) continue;
+
+    const catRow = await prisma.category.findUnique({
+      where: { name: rule.suggestCategory },
+    });
+    if (!catRow) continue;
+
+    await prisma.transaction.update({
+      where: { id: opts.tx.id },
+      data: {
+        categoryId: catRow.id,
+        status: 'resolved',
+        confidence: rule.confidence,
+        signalSource: 'user_rule',
+        matchedRuleId: rule.id,
+        updatedAt: new Date(),
+      },
+    });
+
+    void checkBudgetForCategory(catRow.id).catch((err) =>
+      console.error('[budgetAlerts] check failed after rule recategorize:', err),
+    );
+
+    console.log(
+      `[recategorize] rule "${rule.name}" fired on ${opts.tx.id}: → ${rule.suggestCategory} (conf ${rule.confidence})`,
+    );
+
+    return {
+      updated: true,
+      newCategory: rule.suggestCategory,
+      newMerchant: null,
+      confidence: rule.confidence,
+      matchedPlacesType: `user_rule:${rule.id}`,
+    };
+  }
+
+  return null;
 }
 
 /**

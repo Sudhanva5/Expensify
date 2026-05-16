@@ -10,6 +10,9 @@ struct SettingsView: View {
     @State private var pingState: PingState = .idle
     @State private var pingResult: APIClient.PingResult?
     @State private var contactsReloading: Bool = false
+    @State private var googleSyncing: Bool = false
+    @State private var googleSyncResult: APIClient.GoogleContactsSyncResult?
+    @State private var googleSyncError: String?
     @State private var testPushState: PingState = .idle
     @State private var testPushResult: APIClient.TestPushResult?
     @State private var testPushError: String?
@@ -33,6 +36,7 @@ struct SettingsView: View {
                     notificationsSection
                     contactsSection
                     budgetsSection
+                    rulesSection
                     accountSection
                 }
                 .listStyle(.insetGrouped)
@@ -254,15 +258,61 @@ struct SettingsView: View {
                 Text("view recent matches")
                     .foregroundStyle(AppColor.textPrimary)
             }
+
+            Button {
+                Task { await runGoogleSync() }
+            } label: {
+                HStack {
+                    Text("sync google contacts")
+                        .foregroundStyle(AppColor.textPrimary)
+                    Spacer()
+                    if googleSyncing {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+            }
+            .disabled(googleSyncing)
+
+            if let result = googleSyncResult {
+                HStack(alignment: .top) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(AppColor.inflow)
+                    Text("fetched \(result.fetched), saved \(result.saved)")
+                        .font(AppFont.caption.monospacedDigit())
+                        .foregroundStyle(AppColor.textTertiary)
+                    Spacer()
+                }
+            } else if let err = googleSyncError {
+                HStack(alignment: .top) {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+                    Text(err)
+                        .font(AppFont.caption)
+                        .foregroundStyle(AppColor.textSecondary)
+                        .lineLimit(4)
+                    Spacer()
+                }
+            }
         } header: {
             Text("contacts")
                 .font(AppFont.sectionLabel)
                 .foregroundStyle(AppColor.textTertiary)
         } footer: {
-            Text("if photos aren't showing on P2P rows, tap 'view recent matches' — that shows which payees matched contacts and whether each contact has a photo. A 'matched · no photo' line means the contact exists in your address book but doesn't have a profile picture saved.")
+            Text("if photos aren't showing on P2P rows, tap 'view recent matches' — that shows which payees matched contacts and whether each contact has a photo. 'sync google contacts' pulls your gmail address book via People API so VPAs that aren't saved on this device still get a photo.")
                 .font(AppFont.caption)
                 .foregroundStyle(AppColor.textTertiary)
         }
+    }
+
+    private func runGoogleSync() async {
+        googleSyncing = true
+        googleSyncResult = nil
+        googleSyncError = nil
+        do {
+            googleSyncResult = try await APIClient.shared.syncGoogleContacts()
+        } catch {
+            googleSyncError = error.localizedDescription
+        }
+        googleSyncing = false
     }
 
     private var authLabel: String {
@@ -298,6 +348,37 @@ struct SettingsView: View {
                 .foregroundStyle(AppColor.textTertiary)
         } footer: {
             Text("set a monthly limit per category. we'll notify you as you approach or cross it.")
+                .font(AppFont.caption)
+                .foregroundStyle(AppColor.textTertiary)
+        }
+    }
+
+    /// Contextual auto-tagging rules. The "create rule from this
+    /// transaction" wizard creates these inline from the category
+    /// picker; this row is the management surface — list/disable/delete.
+    private var rulesSection: some View {
+        Section {
+            NavigationLink {
+                ManageRulesView()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppColor.textPrimary)
+                        .frame(width: 24, height: 24)
+                        .background(AppColor.avatarFill)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    Text("manage rules")
+                        .font(.system(size: 15))
+                        .foregroundStyle(AppColor.textPrimary)
+                }
+            }
+        } header: {
+            Text("rules")
+                .font(AppFont.sectionLabel)
+                .foregroundStyle(AppColor.textTertiary)
+        } footer: {
+            Text("rules auto-tag transactions matching contextual patterns — amount range, time of day, distance from a saved location. create them from any category picker.")
                 .font(AppFont.caption)
                 .foregroundStyle(AppColor.textTertiary)
         }

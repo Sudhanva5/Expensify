@@ -76,6 +76,15 @@ export interface RuleConditions {
   payeeRegex?: string;
   payeeNotInAliasTable?: boolean;
   vpaShape?: VpaShape;
+  /// Triggers only when the transaction's iPhone-captured location is
+  /// inside this radius. Used by the "near my office → Travel" rule
+  /// pattern. Only checked when the recategorize-with-location pass has
+  /// the tx's lat/lng available; ignored at initial ingest.
+  locationWithinRadius?: {
+    lat: number;
+    lng: number;
+    meters: number;
+  };
 }
 
 export interface UserRule {
@@ -91,6 +100,11 @@ export interface UserRule {
 export interface RuleEvalContext {
   aliasMatched: boolean;
   vpaShape: VpaShape;
+  /// Optional transaction GPS. Provided only by paths that have it —
+  /// the location-recategorize pass. Initial ingest leaves it nil and
+  /// any rule with a `locationWithinRadius` condition won't fire then.
+  txLat?: number;
+  txLng?: number;
 }
 
 // === Threshold ===

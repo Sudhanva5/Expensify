@@ -96,6 +96,21 @@ final class ContactsService {
     /// Snapshot of CNContacts we fetched — used to lazy-load photos.
     private var cnContactsById: [String: CNContact] = [:]
 
+    /// Photo bytes for Google-contact matches, keyed by the transaction's
+    /// VPA. Populated by `fetchGooglePhotoIfNeeded(for:)` when the local
+    /// CNContactStore has no entry (or no photo) — the GPay-style "I
+    /// know who you're paying because you share an email account with
+    /// them" lookup. Persisted only in memory for now.
+    private var googlePhotoByVpa: [String: Data] = [:]
+    /// VPAs we've already asked the backend about and got "no match" or
+    /// "no photo" — short-circuits re-fetches on every redraw.
+    private var googleNotFoundVpas: Set<String> = []
+    /// VPAs with an in-flight network request, so onAppear in 50 rows
+    /// doesn't fan out into 50 duplicate fetches for the same payee.
+    private var googleInflight: Set<String> = []
+    /// Display name returned by Google for the VPA (used by detail sheet).
+    private var googleNameByVpa: [String: String] = [:]
+
     /// Fetch authorization status from iOS without prompting. Cheap; safe
     /// to call from view onAppear.
     func refreshAuthorizationStatus() {
@@ -373,6 +388,88 @@ final class ContactsService {
     /// so the user can tell why a row's avatar is initials vs. photo.
     func hasCachedPhoto(_ contact: Contact) -> Bool {
         photoCache[contact.id] != nil
+    }
+
+    // MARK: - Google contacts fallback
+
+    /// In-memory Google photo bytes for a given VPA, if previously fetched.
+    func googlePhotoData(for vpa: String) -> Data? { googlePhotoByVpa[vpa] }
+
+    /// Cached Google display name for a VPA — used by detail sheets to
+    /// surface "actually this VPA belongs to your contact 'Rapido —
+    /// Bengaluru Bike'" even when the local address book had nothing.
+    func googleDisplayName(for vpa: String) -> String? { googleNameByVpa[vpa] }
+
+    /// Best photo for this transaction across both caches:
+    ///   1. Local CN contact match (already tried by call sites today)
+    ///   2. Google contacts match keyed by VPA
+    /// Returns nil when neither has a photo so callers can stay on the
+    /// favicon/initials fallback.
+    func bestPhotoData(for tx: Transaction) -> Data? {
+        if let c = match(for: tx), let img = imageData(for: c) {
+            return img
+        }
+        if let vpa = tx.vpa, let img = googlePhotoByVpa[vpa] {
+            return img
+        }
+        return nil
+    }
+
+    /// Best display name for a transaction across both caches. Mirrors
+    /// `bestPhotoData(for:)` so views can pick a name + photo in one
+    /// consistent call.
+    func bestContactName(for tx: Transaction) -> String? {
+        if let c = match(for: tx) { return c.displayName }
+        if let vpa = tx.vpa, let name = googleNameByVpa[vpa] { return name }
+        return nil
+    }
+
+    /// Hit `/contacts/google-lookup` for the transaction's VPA and cache
+    /// the photo bytes if Google returns one. Idempotent — repeat calls
+    /// for the same VPA short-circuit on the in-flight or 'not found'
+    /// sets. Safe to call from row onAppear; the request is debounced
+    /// per VPA.
+    func fetchGooglePhotoIfNeeded(for tx: Transaction) async {
+        guard tx.direction == .out else { return }
+        guard let vpa = tx.vpa, !vpa.isEmpty else { return }
+        if googlePhotoByVpa[vpa] != nil { return }
+        if googleNotFoundVpas.contains(vpa) { return }
+        if googleInflight.contains(vpa) { return }
+        // Skip if we already have a local CN contact with a photo —
+        // the local one wins and Google would be redundant.
+        if let local = match(for: tx), photoCache[local.id] != nil { return }
+
+        googleInflight.insert(vpa)
+        defer { googleInflight.remove(vpa) }
+
+        do {
+            let result = try await APIClient.shared.googleContactLookup(
+                vpa: vpa,
+                merchantRaw: tx.merchantRaw
+            )
+            guard let result, let urlString = result.photoUrl, let url = URL(string: urlString) else {
+                googleNotFoundVpas.insert(vpa)
+                if let displayName = result?.displayName {
+                    googleNameByVpa[vpa] = displayName
+                }
+                return
+            }
+            // People-API photo URLs are public-ish but lifetime-bounded;
+            // pull the bytes through our own URLSession so the avatar
+            // doesn't try to fetch a URL that expires between renders.
+            let (data, _) = try await URLSession.shared.data(from: url)
+            googlePhotoByVpa[vpa] = data
+            if let displayName = result.displayName {
+                googleNameByVpa[vpa] = displayName
+            }
+        } catch {
+            // Soft-fail: mark not-found so we don't retry every redraw.
+            // The user can still see the initials avatar; no degradation.
+            googleNotFoundVpas.insert(vpa)
+            #if DEBUG
+            print("[ContactsService] google lookup failed for \(vpa): \(error.localizedDescription)")
+            #endif
+        }
     }
 
 }

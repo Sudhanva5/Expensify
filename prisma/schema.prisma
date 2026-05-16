@@ -322,3 +322,36 @@ model EmailReceipt {
   @@index([receivedAt])
   @@index([source, receivedAt])
 }
+
+// ============================================================
+// Google Contacts cache
+// ============================================================
+
+/// Snapshot of the authenticated user's Google contacts, populated by
+/// the People API sync script. Used to attach a "who am I paying"
+/// photo on P2P UPI rows even when the iOS address book doesn't have
+/// the same contact (e.g., contact stored only in Google account).
+///
+/// Single-user V1 — no userId column. A re-sync overwrites the table
+/// rather than diffing, so resourceName is the natural key only inside
+/// a single sync run.
+model GoogleContact {
+  id           String   @id @default(cuid())
+  resourceName String   @unique
+  displayName  String?
+  givenName    String?
+  familyName   String?
+  /// Phone numbers normalized to digits-only (no +91, no spaces, no dashes).
+  /// Lets the VPA-lookup match "9876543210@ybl" against the contact whose
+  /// stored number is "+91 98765 43210".
+  phoneDigits  String[]
+  /// Raw E.164-ish numbers (kept for debugging / display only).
+  phonesRaw    String[]
+  emails       String[]
+  /// People API photo URL. Public-ish but lifetime-bounded — fetch + cache
+  /// the bytes on the client. Empty string when the contact has no photo.
+  photoUrl     String?
+  syncedAt     DateTime @default(now())
+
+  @@index([syncedAt])
+}

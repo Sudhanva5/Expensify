@@ -15,12 +15,17 @@ struct CategoryPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(TransactionStore.self) private var store
 
+    /// Drives the "Save as rule" follow-up sheet. Set when the user picks
+    /// a category; the wizard inherits that category as the rule's action.
+    @State private var createRuleFor: Category?
+
     /// Content-sized detent. Computed from row count + paddings so the
-    /// sheet never has empty space below the list.
+    /// sheet never has empty space below the list. Adds a footer slot
+    /// for the "create rule from this" affordance.
     private var sheetHeight: CGFloat {
-        // header (~52) + divider (~16 with padding) + (7 rows × 48) +
-        // bottom padding (~24) + safe-area cushion (~36) ≈ 460
-        return 460
+        // header (~52) + divider (~16) + (7 rows × 48) + footer button (~52)
+        // + bottom padding (~24) + safe-area cushion (~36) ≈ 520
+        return 520
     }
 
     var body: some View {
@@ -31,6 +36,8 @@ struct CategoryPickerSheet: View {
                 header
                 Divider().opacity(0.4)
                 categoryList
+                Divider().opacity(0.4)
+                createRuleFooter
                 Spacer(minLength: 0)
             }
             .padding(.top, 16)
@@ -38,6 +45,40 @@ struct CategoryPickerSheet: View {
         .presentationDetents([.height(sheetHeight)])
         .presentationDragIndicator(.visible)
         .presentationBackground(AppColor.canvas)
+        .sheet(item: $createRuleFor) { cat in
+            CreateRuleSheet(transaction: transaction, category: cat)
+        }
+    }
+
+    /// Anchored at the bottom of the picker. Opens the "create rule from
+    /// this transaction" wizard pre-filled with the row's current
+    /// category. Available regardless of whether the user changed the
+    /// category — sometimes the displayed category is already right but
+    /// the user wants to teach the system to recognize this *kind* of
+    /// transaction automatically next time.
+    @ViewBuilder
+    private var createRuleFooter: some View {
+        Button {
+            let cat = transaction.category ?? .personalTransfer
+            createRuleFor = cat
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(AppColor.tap)
+                Text("create rule from this transaction")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(AppColor.textPrimary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AppColor.textTertiary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

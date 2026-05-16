@@ -13,8 +13,16 @@ import { prisma } from '../db/client.js';
 
 // gmail.readonly grants metadata + bodies. Don't combine with gmail.metadata —
 // Google grants only the more restrictive scope, which blocks format=FULL fetches.
+//
+// contacts.readonly grants People API access so the backend can return
+// contact photo URLs for VPAs matching a phone-number-shaped local part
+// (the GPay "I know who you're paying because they're in your contacts"
+// trick). Adding this scope requires the user to re-run
+// `scripts/gmail-auth.ts` and re-grant consent — Google won't silently
+// upgrade an existing refresh token's scopes.
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/contacts.readonly',
 ];
 
 export interface OAuthEnv {

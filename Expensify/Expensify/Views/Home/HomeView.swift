@@ -169,15 +169,24 @@ struct HomeView: View {
     }
 
     /// Build a row with contact overlay (name + DP) when the transaction's
-    /// payee matches someone in the address book.
+    /// payee matches someone in the address book or the user's Google
+    /// contacts. The local CNContactStore is checked first; rows whose
+    /// local match has no photo (or whose VPA isn't in the device address
+    /// book at all) trigger a one-shot backend lookup against the cached
+    /// People API snapshot. The same VPA is requested at most once per
+    /// app launch (see ContactsService's `googleNotFoundVpas` set).
     @ViewBuilder
     private func rowFor(_ tx: Transaction) -> some View {
-        let contact = contactsService.match(for: tx)
+        let displayName = contactsService.bestContactName(for: tx)
+        let photo = contactsService.bestPhotoData(for: tx)
         TransactionRow(
             transaction: tx,
-            contactName: contact?.displayName,
-            contactImageData: contact.flatMap { contactsService.imageData(for: $0) }
+            contactName: displayName,
+            contactImageData: photo
         )
+        .task {
+            await contactsService.fetchGooglePhotoIfNeeded(for: tx)
+        }
     }
 
     private struct MonthSection: Identifiable {

@@ -18,6 +18,15 @@ actor APIClient {
         return d
     }()
 
+    /// Rule conditions are stored verbatim in a JSONB column on the
+    /// backend and read by the rule evaluator using exact (camelCase)
+    /// keys like `amountBetween`, `locationWithinRadius`. The shared
+    /// snake_case-converting encoder would mangle these into
+    /// `amount_between` / `location_within_radius`, which the Zod
+    /// validator rejects. Use a raw encoder for rule traffic.
+    private let plainEncoder = JSONEncoder()
+    private let plainDecoder = JSONDecoder()
+
     // MARK: - Connectivity test (used by Settings → Test connection)
 
     struct PingResult {
@@ -221,6 +230,190 @@ actor APIClient {
             throw APIError.invalidResponse
         }
         var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
+        let (data, http) = try await HTTPClient.shared.send(req)
+        try ensure2xx(http: http, data: data)
+    }
+
+    // MARK: - User rules
+
+    private struct RuleWire: Decodable {
+        let id: String
+        let name: String
+        let priority: Int
+        let enabled: Bool
+        let conditions: UserRule.Conditions
+        let category: String
+        let confidence: Double
+        let hitCount: Int
+    }
+
+    /// List every user-authored rule (enabled + disabled).
+    func fetchRules() async throws -> [UserRule] {
+        var req = URLRequest(url: Constants.baseURL.appendingPathComponent("/rules/"))
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
+        let (data, http) = try await HTTPClient.shared.send(req)
+        try ensure2xx(http: http, data: data)
+
+        // Top-level keys mix conventions (hit_count vs name), so decode the
+        // outer envelope with the snake-case decoder. Conditions inside are
+        // camelCase JSONB — Codable matches them by exact name since they
+        // contain no underscores in the source struct.
+        let wires = try decoder.decode([RuleWire].self, from: data)
+        return wires.compactMap { w in
+            guard let cat = Category(rawValue: w.category) else { return nil }
+            return UserRule(
+                id: w.id,
+                name: w.name,
+                priority: w.priority,
+                enabled: w.enabled,
+                conditions: w.conditions,
+                category: cat,
+                confidence: w.confidence,
+                hitCount: w.hitCount
+            )
+        }
+    }
+
+    /// Create a rule. Sourced by the "Create rule from this transaction"
+    /// wizard. Confidence defaults to 0.95 (auto-tag threshold) so a fresh
+    /// rule immediately resolves matching transactions.
+    func createRule(
+        name: String,
+        category: Category,
+        conditions: UserRule.Conditions,
+        priority: Int = 100,
+        confidence: Double = 0.95
+    ) async throws -> UserRule {
+        struct Body: Encodable {
+            let name: String
+            let priority: Int
+            let enabled: Bool
+            let conditions: UserRule.Conditions
+            let category: String
+            let confidence: Double
+        }
+        let body = Body(
+            name: name,
+            priority: priority,
+            enabled: true,
+            conditions: conditions,
+            category: category.rawValue,
+            confidence: confidence
+        )
+
+        var req = URLRequest(url: Constants.baseURL.appendingPathComponent("/rules/"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
+        // Keep camelCase on the wire — the rule schema's nested condition
+        // keys (amountBetween, locationWithinRadius, etc.) are validated
+        // verbatim and stored verbatim into JSONB.
+        req.httpBody = try plainEncoder.encode(body)
+
+        let (data, http) = try await HTTPClient.shared.send(req)
+        try ensure2xx(http: http, data: data)
+        let wire = try decoder.decode(RuleWire.self, from: data)
+        guard let cat = Category(rawValue: wire.category) else {
+            throw APIError.invalidResponse
+        }
+        return UserRule(
+            id: wire.id,
+            name: wire.name,
+            priority: wire.priority,
+            enabled: wire.enabled,
+            conditions: wire.conditions,
+            category: cat,
+            confidence: wire.confidence,
+            hitCount: wire.hitCount
+        )
+    }
+
+    /// Flip enabled on an existing rule. Used by the manage-rules toggle.
+    func setRuleEnabled(id: String, enabled: Bool) async throws {
+        struct Body: Encodable { let enabled: Bool }
+        try await patchNoContent(path: "/rules/\(id)", body: Body(enabled: enabled))
+    }
+
+    // MARK: - Google contacts
+
+    struct GoogleContactLookup: Sendable {
+        let resourceName: String
+        let displayName: String?
+        let photoUrl: String?
+        let matchedOn: String
+    }
+
+    struct GoogleContactsSyncResult: Sendable {
+        let fetched: Int
+        let saved: Int
+    }
+
+    /// Trigger a fresh People API pull on the backend. The Google-contact
+    /// cache is wiped + replaced atomically inside the request. Returns
+    /// fetched (how many came back from the API) and saved (how many
+    /// were persisted after filtering out blank rows / placeholders).
+    func syncGoogleContacts() async throws -> GoogleContactsSyncResult {
+        var req = URLRequest(url: Constants.baseURL.appendingPathComponent("/contacts/sync"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
+        req.httpBody = "{}".data(using: .utf8)
+        let (data, http) = try await HTTPClient.shared.send(req)
+        try ensure2xx(http: http, data: data)
+        struct Wire: Decodable { let ok: Bool; let fetched: Int; let saved: Int }
+        let w = try decoder.decode(Wire.self, from: data)
+        return GoogleContactsSyncResult(fetched: w.fetched, saved: w.saved)
+    }
+
+    /// Ask the backend for a Google-contact match against this VPA. The
+    /// backend matches by phone-shaped local part first, then falls back
+    /// to fuzzy name overlap on the merchant text. Returns nil when
+    /// nothing matched (204 No Content) so callers can stay on the
+    /// CNContactStore result.
+    func googleContactLookup(
+        vpa: String?,
+        merchantRaw: String?
+    ) async throws -> GoogleContactLookup? {
+        var components = URLComponents(
+            url: Constants.baseURL.appendingPathComponent("/contacts/google-lookup"),
+            resolvingAgainstBaseURL: false
+        )
+        var items: [URLQueryItem] = []
+        if let vpa, !vpa.isEmpty { items.append(URLQueryItem(name: "vpa", value: vpa)) }
+        if let merchantRaw, !merchantRaw.isEmpty {
+            items.append(URLQueryItem(name: "merchantRaw", value: merchantRaw))
+        }
+        components?.queryItems = items
+        guard let url = components?.url else { throw APIError.invalidResponse }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
+        let (data, http) = try await HTTPClient.shared.send(req)
+        if http.statusCode == 204 { return nil }
+        try ensure2xx(http: http, data: data)
+
+        struct Wire: Decodable {
+            let resourceName: String
+            let displayName: String?
+            let photoUrl: String?
+            let matchedOn: String
+        }
+        let w = try decoder.decode(Wire.self, from: data)
+        return GoogleContactLookup(
+            resourceName: w.resourceName,
+            displayName: w.displayName,
+            photoUrl: w.photoUrl,
+            matchedOn: w.matchedOn
+        )
+    }
+
+    /// Remove a rule entirely.
+    func deleteRule(id: String) async throws {
+        var req = URLRequest(url: Constants.baseURL.appendingPathComponent("/rules/\(id)"))
         req.httpMethod = "DELETE"
         req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
         let (data, http) = try await HTTPClient.shared.send(req)

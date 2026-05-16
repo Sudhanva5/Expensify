@@ -12,6 +12,8 @@ import { healthRoute } from './server/routes/health.js';
 import { devicesRoute } from './server/routes/devices.js';
 import { transactionsRoute } from './server/routes/transactions.js';
 import { budgetsRoute } from './server/routes/budgets.js';
+import { rulesRoute } from './server/routes/rules.js';
+import { contactsRoute } from './server/routes/contacts.js';
 import { scheduleWatchRefresh } from './server/cron.js';
 
 export async function buildServer() {
@@ -28,6 +30,8 @@ export async function buildServer() {
   await app.register(devicesRoute, { prefix: '/devices' });
   await app.register(transactionsRoute, { prefix: '/transactions' });
   await app.register(budgetsRoute, { prefix: '/budgets' });
+  await app.register(rulesRoute, { prefix: '/rules' });
+  await app.register(contactsRoute, { prefix: '/contacts' });
 
   return app;
 }
