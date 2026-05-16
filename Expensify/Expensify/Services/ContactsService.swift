@@ -332,4 +332,11 @@ final class ContactsService {
         photoCache[contact.id]
     }
 
+    /// True if a given contact has cached photo data. Used by the
+    /// Settings → Contacts match-preview to show "📷 yes" / "—" badges
+    /// so the user can tell why a row's avatar is initials vs. photo.
+    func hasCachedPhoto(_ contact: Contact) -> Bool {
+        photoCache[contact.id] != nil
+    }
+
 }

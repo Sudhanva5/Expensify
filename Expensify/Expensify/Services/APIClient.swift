@@ -235,6 +235,48 @@ actor APIClient {
         try await postNoContent(path: "/devices/register", body: Body(apnsToken: apnsToken))
     }
 
+    /// Fire a synthetic visible push to every device the backend knows
+    /// about (right now: just this iPhone). Used by Settings →
+    /// "Send test notification" to verify APNs delivery without
+    /// having to cross a real budget threshold.
+    func sendTestPush() async throws -> TestPushResult {
+        struct Wire: Decodable {
+            let ok: Bool
+            let reason: String?
+            let devices: [DeviceWire]
+            struct DeviceWire: Decodable {
+                let tokenPrefix: String
+                let lastSeen: String
+                let delivered: Bool
+            }
+        }
+
+        var req = URLRequest(url: Constants.baseURL.appendingPathComponent("/devices/test-push"))
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Empty body — server only needs the auth header + registered devices.
+        req.httpBody = "{}".data(using: .utf8)
+
+        let (data, http) = try await HTTPClient.shared.send(req)
+        try ensure2xx(http: http, data: data)
+        let wire = try decoder.decode(Wire.self, from: data)
+        return TestPushResult(
+            ok: wire.ok,
+            reason: wire.reason,
+            deviceCount: wire.devices.count,
+            delivered: wire.devices.filter { $0.delivered }.count
+        )
+    }
+
+    struct TestPushResult: Sendable {
+        let ok: Bool
+        /// Server-supplied reason when ok=false (e.g. "no_registered_devices").
+        let reason: String?
+        let deviceCount: Int
+        let delivered: Int
+    }
+
     /// Upload the captured GPS for a transaction.
     func uploadLocation(
         transactionId: String,

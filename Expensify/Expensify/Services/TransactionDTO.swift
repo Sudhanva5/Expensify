@@ -23,6 +23,18 @@ struct TransactionDTO: Codable {
     /// Optional receipt info (from /receipts pipeline). Backend returns
     /// `null` when no receipt has been bound to this transaction yet.
     let receipt: ReceiptDTO?
+    /// Optional list of nearby Places candidates persisted at recategorize
+    /// time, surfaced as suggestions when no auto-tag was possible.
+    let placesSuggestions: [PlaceSuggestionDTO]?
+
+    struct PlaceSuggestionDTO: Codable {
+        let name: String
+        let category: String
+        let distanceM: Int
+        let lat: Double?
+        let lng: Double?
+        let formattedAddress: String?
+    }
 
     func toModel() -> Transaction? {
         let dir: Transaction.Direction
@@ -87,7 +99,17 @@ struct TransactionDTO: Codable {
             locationLng: locationLng,
             locationCity: nil,
             locationStatus: locStatus,
-            receipt: receipt?.toModel()
+            receipt: receipt?.toModel(),
+            placesSuggestions: placesSuggestions?.map {
+                PlaceSuggestion(
+                    name: $0.name,
+                    category: $0.category,
+                    distanceM: $0.distanceM,
+                    lat: $0.lat,
+                    lng: $0.lng,
+                    formattedAddress: $0.formattedAddress
+                )
+            }
         )
     }
 }

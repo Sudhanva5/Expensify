@@ -54,6 +54,12 @@ model Transaction {
   status        TxStatus  @default(awaiting_location)
   autoFinalized Boolean   @default(false)
 
+  /// Top-N nearby Places candidates from the recategorize pass, kept
+  /// even when ambiguity or low confidence prevented an auto-tag. iOS
+  /// surfaces these as "Nearby places" suggestions the user can tap to
+  /// claim one. Shape: `[{ name, category, distanceM, lat, lng }, ...]`.
+  placesSuggestions Json?
+
   tags     TransactionTag[]
   receipts EmailReceipt[]
 

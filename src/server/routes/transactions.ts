@@ -102,6 +102,7 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
           location_lat: r.locationLat !== null ? Number(r.locationLat) : null,
           location_lng: r.locationLng !== null ? Number(r.locationLng) : null,
           location_status: r.locationStatus,
+          places_suggestions: r.placesSuggestions ?? null,
           receipt: receipt
             ? {
                 id: receipt.id,

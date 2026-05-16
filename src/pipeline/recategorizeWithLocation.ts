@@ -24,6 +24,7 @@
 // cheaper, and deterministic. No LLM call needed.
 
 import { prisma } from '../db/client.js';
+import { Prisma } from '@prisma/client';
 import { buildOptionalPlacesClient } from '../services/places.js';
 import {
   mapPlacesTypesToCategory,
@@ -95,19 +96,41 @@ export async function recategorizeWithLocation(opts: {
     return { updated: false, reason: 'no_places_within_strict_distance' };
   }
 
-  // Find every candidate whose types map to a V1 category, then require
-  // exactly ONE strong match within the strict radius. If two or more places
-  // around the same point both look like real merchants (e.g. two
-  // restaurants in the same building), we can't disambiguate from GPS
-  // alone — drop into review rather than guess.
+  // Find every candidate whose types map to a V1 category.
   const matched = tightlyNearby
     .map((c) => ({ candidate: c, match: mapPlacesTypesToCategory(c.types) }))
     .filter((row): row is { candidate: typeof tightlyNearby[number]; match: NonNullable<ReturnType<typeof mapPlacesTypesToCategory>> } => row.match !== null);
+
+  // Persist the top mapped candidates as "suggestions" regardless of
+  // whether we can auto-pick one. iOS surfaces these as a "Nearby
+  // places" picker in the detail sheet so the user can claim the right
+  // one in one tap. Saved with distance + category so the picker can
+  // show meaningful chips.
+  const suggestions = matched.slice(0, 5).map(({ candidate, match }) => ({
+    name: candidate.name,
+    category: match.category,
+    distanceM: Math.round(
+      haversineMeters(opts.lat, opts.lng, candidate.lat || opts.lat, candidate.lng || opts.lng),
+    ),
+    lat: candidate.lat,
+    lng: candidate.lng,
+    formattedAddress: candidate.formattedAddress ?? null,
+  }));
+  if (suggestions.length > 0) {
+    await prisma.transaction.update({
+      where: { id: tx.id },
+      data: {
+        placesSuggestions: suggestions as unknown as Prisma.InputJsonValue,
+      },
+    });
+  }
 
   if (matched.length === 0) {
     return { updated: false, reason: 'no_recognized_place_type' };
   }
   if (matched.length > 1) {
+    // Multiple mapped candidates — can't pick ONE confidently, but the
+    // user gets to see all of them via the persisted suggestions above.
     return {
       updated: false,
       reason: `ambiguous_${matched.length}_candidates`,

@@ -65,6 +65,14 @@ struct TransactionDetailSheet: View {
                     header
                     if hasMap { mapPreview }
                     if hasMap { mapsButton }
+                    if let suggestions = transaction.placesSuggestions,
+                       !suggestions.isEmpty,
+                       !transaction.hasResolvedMerchant {
+                        NearbyPlacesPicker(
+                            transactionId: transaction.id,
+                            suggestions: suggestions
+                        )
+                    }
                     if let receipt = transaction.receipt {
                         ReceiptCard(receipt: receipt)
                     }

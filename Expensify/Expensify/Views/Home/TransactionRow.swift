@@ -145,11 +145,13 @@ struct TransactionRow: View {
 
     /// Show the "more details" chip when the sheet would actually have
     /// something useful — Places resolution, GPS coordinates for a map,
-    /// OR a Gmail-sourced receipt with items / order ID.
+    /// a Gmail-sourced receipt, OR un-claimed Places suggestions the
+    /// user can pick from.
     private var shouldShowInfo: Bool {
         transaction.hasResolvedMerchant ||
         transaction.hasCoordinates ||
-        transaction.receipt != nil
+        transaction.receipt != nil ||
+        (transaction.placesSuggestions?.isEmpty == false)
     }
 
     private var categoryText: String {

@@ -26,6 +26,11 @@ struct Transaction: Identifiable, Hashable {
     /// timestamp. Used by the bottom-sheet "more details" to render the
     /// receipt card (items + Gmail deep link).
     var receipt: ReceiptDetails? = nil
+    /// Optional list of nearby Google Places candidates from the
+    /// recategorize pass. Kept even when ambiguity prevented an
+    /// auto-tag — iOS shows them as a "Nearby places" picker so the
+    /// user can claim the right one with one tap.
+    var placesSuggestions: [PlaceSuggestion]? = nil
 
     enum LocationStatus: String, Codable, Hashable {
         case awaiting

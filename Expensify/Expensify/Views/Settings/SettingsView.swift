@@ -10,6 +10,9 @@ struct SettingsView: View {
     @State private var pingState: PingState = .idle
     @State private var pingResult: APIClient.PingResult?
     @State private var contactsReloading: Bool = false
+    @State private var testPushState: PingState = .idle
+    @State private var testPushResult: APIClient.TestPushResult?
+    @State private var testPushError: String?
 
     enum PingState { case idle, running, done }
 
@@ -27,6 +30,7 @@ struct SettingsView: View {
                 List {
                     profileSection
                     connectionSection
+                    notificationsSection
                     contactsSection
                     budgetsSection
                     accountSection
@@ -126,6 +130,77 @@ struct SettingsView: View {
         pingState = .done
     }
 
+    /// Sends a synthetic visible push to every registered device via the
+    /// backend's `/devices/test-push` endpoint. Used to verify APNs
+    /// delivery without waiting for a real budget threshold to trip.
+    /// Shows result inline: device count, delivery success/fail, or the
+    /// error message if the endpoint itself failed.
+    private var notificationsSection: some View {
+        Section {
+            Button {
+                Task { await runTestPush() }
+            } label: {
+                HStack {
+                    Text("send test notification")
+                        .foregroundStyle(AppColor.textPrimary)
+                    Spacer()
+                    if testPushState == .running {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+            }
+            .disabled(testPushState == .running)
+
+            if let result = testPushResult {
+                HStack(alignment: .top) {
+                    Image(systemName: result.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(result.ok ? AppColor.inflow : .red)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("delivered to \(result.delivered) of \(result.deviceCount) device\(result.deviceCount == 1 ? "" : "s")")
+                            .font(.system(size: 14))
+                            .foregroundStyle(AppColor.textPrimary)
+                        if let reason = result.reason {
+                            Text("reason: \(reason)")
+                                .font(AppFont.caption)
+                                .foregroundStyle(AppColor.textTertiary)
+                        }
+                    }
+                    Spacer()
+                }
+            } else if let error = testPushError {
+                HStack(alignment: .top) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.red)
+                    Text(error)
+                        .font(AppFont.caption)
+                        .foregroundStyle(AppColor.textSecondary)
+                        .lineLimit(4)
+                }
+            }
+        } header: {
+            Text("notifications")
+                .font(AppFont.sectionLabel)
+                .foregroundStyle(AppColor.textTertiary)
+        } footer: {
+            Text("verifies the budget-alert push pipeline end-to-end. if you don't see a banner within ~10 seconds, check iOS Settings → Expensify → Notifications.")
+                .font(AppFont.caption)
+                .foregroundStyle(AppColor.textTertiary)
+        }
+    }
+
+    private func runTestPush() async {
+        testPushState = .running
+        testPushResult = nil
+        testPushError = nil
+        do {
+            let result = try await APIClient.shared.sendTestPush()
+            testPushResult = result
+        } catch {
+            testPushError = error.localizedDescription
+        }
+        testPushState = .done
+    }
+
     /// Surface contact-matching state so the user can tell whether the
     /// in-app contacts index is healthy. Shows authorization status, total
     /// contacts loaded, and how many of them have a photo cached. A
@@ -170,12 +245,21 @@ struct SettingsView: View {
                 }
             }
             .disabled(contactsReloading)
+
+            // Diagnostic: per-row breakdown of which payees matched
+            // which contacts and whether each has a photo cached.
+            NavigationLink {
+                ContactMatchPreview()
+            } label: {
+                Text("view recent matches")
+                    .foregroundStyle(AppColor.textPrimary)
+            }
         } header: {
             Text("contacts")
                 .font(AppFont.sectionLabel)
                 .foregroundStyle(AppColor.textTertiary)
         } footer: {
-            Text("if photos aren't showing on P2P rows, check that `photos` count above is non-zero. If contacts permission was denied, tap reload after re-enabling it in Settings → Expensify → Contacts.")
+            Text("if photos aren't showing on P2P rows, tap 'view recent matches' — that shows which payees matched contacts and whether each contact has a photo. A 'matched · no photo' line means the contact exists in your address book but doesn't have a profile picture saved.")
                 .font(AppFont.caption)
                 .foregroundStyle(AppColor.textTertiary)
         }
