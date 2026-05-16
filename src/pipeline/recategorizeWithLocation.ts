@@ -98,13 +98,13 @@ export async function recategorizeWithLocation(opts: {
   });
   if (ruleHit) return ruleHit;
 
-  // Ask Places for a 20m sample so the haversine filter at STRICT_DISTANCE_M
+  // Ask Places for a 30m sample so the haversine filter at STRICT_DISTANCE_M
   // has enough candidates to choose from. Auto-tag still requires single-
   // strong-match within the strict radius; widening the search just gives
   // the suggestion picker more rows to render.
   let candidates;
   try {
-    candidates = await places.nearby({ lat: opts.lat, lng: opts.lng, radiusMeters: 20 });
+    candidates = await places.nearby({ lat: opts.lat, lng: opts.lng, radiusMeters: 30 });
   } catch (err) {
     console.error('[recategorize] Places lookup failed:', err);
     return { updated: false, reason: 'places_call_failed' };
@@ -114,12 +114,12 @@ export async function recategorizeWithLocation(opts: {
   }
 
   // The Places API "radius" is a hint, not a hard filter — it'll happily
-  // return shops 20-30m away when ranked by relevance. Re-filter strictly
+  // return shops further away when ranked by relevance. Re-filter strictly
   // using a real haversine distance on the candidate centroids, so we only
-  // consider places that are physically within ~20m of the transaction GPS.
-  // 20m is wide enough to catch the actual destination through typical
-  // urban GPS jitter (5-10m), narrow enough to exclude the next plaza.
-  const STRICT_DISTANCE_M = 20;
+  // consider places that are physically within ~30m of the transaction GPS.
+  // 30m absorbs typical urban GPS jitter (5-25m on iPhone) without pulling
+  // in the next plaza.
+  const STRICT_DISTANCE_M = 30;
   const tightlyNearby = candidates.filter((c) => {
     if (!c.lat || !c.lng) return false;
     return haversineMeters(opts.lat, opts.lng, c.lat, c.lng) <= STRICT_DISTANCE_M;

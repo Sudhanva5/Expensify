@@ -74,6 +74,21 @@ enum MerchantBranding {
         "Instamart": "swiggy.com",
         "DMart": "dmart.in",
 
+        // Amazon — bank statements use a bunch of slightly different
+        // legal-entity names depending on whether it's Prime, Pay,
+        // Marketplace, or the seller-services subsidiary. All of them
+        // are owned by Amazon and visually want the same logo.
+        "Amazon": "amazon.in",
+        "Amazon.in": "amazon.in",
+        "Amazon Pay": "amazon.in",
+        "Amazon Prime": "primevideo.com",
+        "Prime Video": "primevideo.com",
+        "AMZN": "amazon.in",
+        "Amazon Seller Services": "amazon.in",
+        "AMAZON SELLER SERVICES": "amazon.in",
+        "Amazon Web Services": "aws.amazon.com",
+        "AWS": "aws.amazon.com",
+
         // Bank / Finance
         "HDFC": "hdfcbank.com",
         "HDFC Bank": "hdfcbank.com",

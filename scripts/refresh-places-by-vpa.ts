@@ -21,7 +21,7 @@ function getArg(name: string): string | null {
   return process.argv[idx + 1] ?? null;
 }
 
-const STRICT_DISTANCE_M = 20;
+const STRICT_DISTANCE_M = 30;
 
 async function main() {
   const vpaFilter = getArg('vpa');
