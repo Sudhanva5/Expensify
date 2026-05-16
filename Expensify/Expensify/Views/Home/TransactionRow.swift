@@ -143,12 +143,18 @@ struct TransactionRow: View {
         return cn
     }
 
-    /// Show the "more details" chip when the sheet would actually have
-    /// something useful — Places resolution, GPS coordinates for a map,
-    /// a Gmail-sourced receipt, OR un-claimed Places suggestions the
-    /// user can pick from.
+    /// Show the "more details" chip only when the sheet has something
+    /// the user can't already see on the row itself:
+    ///   • a map preview (we have GPS coords)
+    ///   • a Gmail-sourced receipt (online merchant order details)
+    ///   • un-claimed Places suggestions (tap-to-tag picker)
+    ///
+    /// Deliberately NOT triggered by `hasResolvedMerchant` alone —
+    /// alias-resolved rows like "NAME-CHEAP.COM* S0EXHV → Namecheap"
+    /// have a different merchantNormalized than merchantRaw but there
+    /// is no additional content for the sheet to show. Showing the
+    /// chip there is just a confusing no-op tap.
     private var shouldShowInfo: Bool {
-        transaction.hasResolvedMerchant ||
         transaction.hasCoordinates ||
         transaction.receipt != nil ||
         (transaction.placesSuggestions?.isEmpty == false)

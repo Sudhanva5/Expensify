@@ -28,7 +28,7 @@ export type ReceiptOutcome =
       orderId: string | null;
       itemsCount: number;
       boundTransactionId: string | null;
-      matchReason: 'amount_and_window' | 'amount_only' | 'no_match';
+      matchReason: 'amount_and_window' | 'amount_only' | 'no_match' | 'source_merchant_mismatch';
     };
 
 /** ±30 minute matching window between receipt arrival and HDFC transaction. */
@@ -66,10 +66,15 @@ export async function processReceiptEmail(msg: ExtractedMessage): Promise<Receip
     };
   }
 
-  // Try to bind to a recent HDFC transaction.
+  // Try to bind to a recent HDFC transaction. Pass the receipt's source
+  // so we can require merchant↔source alignment (a Swiggy receipt
+  // shouldn't bind to a Paytm-QR transaction with a coincidentally
+  // matching amount — that's how "Thimmegowda" got tagged to a Swiggy
+  // email previously).
   const matchResult = await tryBindToTransaction({
     amountInrMinor: extracted.amountInrMinor,
     receivedAt: msg.receivedAt,
+    source: extracted.sourceOverride ?? source,
   });
 
   // Some parsers (e.g. Instamart inside the swiggy.in chain) reclassify
@@ -115,20 +120,55 @@ export async function processReceiptEmail(msg: ExtractedMessage): Promise<Receip
 
 interface MatchResult {
   transactionId: string | null;
-  reason: 'amount_and_window' | 'amount_only' | 'no_match';
+  reason: 'amount_and_window' | 'amount_only' | 'no_match' | 'source_merchant_mismatch';
+}
+
+/**
+ * Per-source merchant keywords that a receipt's matched transaction
+ * MUST contain in its `merchantNormalized` or `merchantRaw`. Without
+ * this, a Swiggy receipt for ₹200 could bind to ANY ₹200 outbound
+ * transaction in the window — including offline kirana payments via
+ * Paytm-QR that happen to have the same amount.
+ */
+const SOURCE_MERCHANT_KEYWORDS: Record<string, RegExp> = {
+  swiggy: /swiggy|bundl/i,
+  instamart: /swiggy|instamart|bundl/i,
+  zomato: /zomato/i,
+  amazon: /amazon|amzn/i,
+  bookmyshow: /bookmyshow|bms/i,
+  uber: /uber/i,
+  cab: /uber|ola|rapido/i,
+  travel: /makemytrip|goibibo|cleartrip|easemytrip|irctc|indigo|akasa|vistara/i,
+  airbnb: /airbnb/i,
+  shopping: /amazon|flipkart|myntra|jiomart/i,
+  grocery: /bigbasket|blinkit|zepto|dmart|reliance/i,
+};
+
+/** Returns true when the transaction's merchant text aligns with the source. */
+function merchantMatchesSource(merchant: string, source: string): boolean {
+  const re = SOURCE_MERCHANT_KEYWORDS[source];
+  if (!re) return false; // unknown source → don't bind (safer)
+  return re.test(merchant);
 }
 
 /**
  * Look up an HDFC transaction that this receipt likely corresponds to.
  *
- * Strongest match: exact amount + occurredAt within ±30 minutes of when
- * the receipt landed. If exactly one transaction satisfies that,
- * unambiguous bind. If multiple satisfy, we can't disambiguate from
- * email alone — leave unbound (user can re-link manually later).
+ * Match requires:
+ *   1. Exact amount match
+ *   2. occurredAt within ±30 minutes of receipt arrival (or amount-only
+ *      fallback when window match yields nothing)
+ *   3. **Merchant ↔ source alignment** — the transaction's merchantRaw
+ *      or merchantNormalized must mention a keyword for the receipt's
+ *      source. A Swiggy receipt can only bind to a transaction whose
+ *      merchant text mentions Swiggy/Bundl. Without this guard, random
+ *      same-amount coincidences bind incorrectly (the "Thimmegowda
+ *      got a Swiggy email tagged to it" class of bug).
  */
 async function tryBindToTransaction(opts: {
   amountInrMinor: bigint | null;
   receivedAt: Date;
+  source: string;
 }): Promise<MatchResult> {
   if (opts.amountInrMinor === null) {
     return { transactionId: null, reason: 'no_match' };
@@ -143,29 +183,39 @@ async function tryBindToTransaction(opts: {
       direction: 'out',
       occurredAt: { gte: since, lte: until },
     },
-    select: { id: true, occurredAt: true },
+    select: { id: true, occurredAt: true, merchantRaw: true, merchantNormalized: true },
     orderBy: { occurredAt: 'asc' },
   });
 
-  if (candidates.length === 1) {
-    return { transactionId: candidates[0]!.id, reason: 'amount_and_window' };
+  // Require merchant↔source alignment.
+  const aligned = candidates.filter((c) =>
+    merchantMatchesSource(`${c.merchantRaw} ${c.merchantNormalized}`, opts.source),
+  );
+
+  if (aligned.length === 1) {
+    return { transactionId: aligned[0]!.id, reason: 'amount_and_window' };
+  }
+  if (aligned.length === 0 && candidates.length > 0) {
+    // We had same-amount candidates but none aligned with the source —
+    // reject the bind explicitly so iOS doesn't show a misleading link.
+    return { transactionId: null, reason: 'source_merchant_mismatch' };
   }
   if (candidates.length === 0) {
-    // Try a relaxed match — same amount, any time. If exactly one row
-    // matches that's still a valid bind; banks sometimes send the alert
-    // hours after the receipt for delayed authorizations.
+    // Relaxed match — same amount, any time. Still requires source alignment.
     const sameAmount = await prisma.transaction.findMany({
       where: {
         amountInrMinor: opts.amountInrMinor,
         direction: 'out',
       },
-      select: { id: true },
+      select: { id: true, merchantRaw: true, merchantNormalized: true },
     });
-    if (sameAmount.length === 1) {
-      return { transactionId: sameAmount[0]!.id, reason: 'amount_only' };
+    const sameAmountAligned = sameAmount.filter((c) =>
+      merchantMatchesSource(`${c.merchantRaw} ${c.merchantNormalized}`, opts.source),
+    );
+    if (sameAmountAligned.length === 1) {
+      return { transactionId: sameAmountAligned[0]!.id, reason: 'amount_only' };
     }
   }
-  // 2+ candidates — ambiguous. Don't guess.
   return { transactionId: null, reason: 'no_match' };
 }
 

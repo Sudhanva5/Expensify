@@ -163,16 +163,35 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'Transaction not found' });
       }
 
-      // Pattern learning. When the user confirms a category (via swipe or
-      // edit-tag), record it against the merchant's normalized name so
-      // future transactions for the same merchant auto-tag after 3 hits.
-      // Best-effort: never blocks the response, never throws.
+      // Pattern learning. When the user confirms a category we record it
+      // against TWO keys:
+      //   1. The VPA (single-hit auto-tag, bulk-updates other rows with
+      //      the same VPA — the user's explicit ask "if I tag this, fix
+      //      every other row with the same VPA").
+      //   2. The merchant's normalized name (3-hit threshold, catches
+      //      Surendra Shetty / Veerabharaiah Store with no VPA).
+      // Both run best-effort; never blocks the response or throws.
       if (updates.categoryId) {
         try {
           const tx = await prisma.transaction.findUnique({
             where: { id },
-            select: { merchantNormalized: true },
+            select: { merchantNormalized: true, vpa: true },
           });
+          // VPA-pattern first — bulk update fires here.
+          if (tx?.vpa) {
+            const { recordVpaConfirmation } = await import('../../db/vpaPatterns.js');
+            const vpaResult = await recordVpaConfirmation({
+              vpa: tx.vpa,
+              categoryId: updates.categoryId,
+              excludeTransactionId: id,
+            });
+            req.log.info(
+              { vpa: tx.vpa, ...vpaResult },
+              '[vpa-pattern] recorded confirmation + bulk-updated rows',
+            );
+          }
+          // Merchant-name pattern (lower priority but still useful for
+          // cases where VPA varies but merchant text is stable).
           if (tx?.merchantNormalized) {
             const { recordConfirmation } = await import(
               '../../db/merchantPatterns.js'
@@ -188,7 +207,7 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
                 autoTagActive: result.autoTagActive,
                 categoryChanged: result.categoryChanged,
               },
-              '[pattern-learning] recorded user confirmation',
+              '[merchant-pattern] recorded user confirmation',
             );
           }
         } catch (err) {

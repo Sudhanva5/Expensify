@@ -103,6 +103,7 @@ model Category {
   transactions Transaction[]
   budgets      Budget[]
   patterns     MerchantPattern[]
+  vpaPatterns  VpaPattern[]
   rules        UserRule[]
   aliases      MerchantAlias[]
 }
@@ -145,6 +146,23 @@ model MerchantPattern {
   autoTagActive      Boolean  @default(false)
   firstSeenAt        DateTime @default(now())
   lastConfirmedAt    DateTime @default(now())
+}
+
+/// VPA-keyed pattern. Single hit is enough to flip autoTagActive — UPI
+/// VPAs are unique-per-shop (much more so than merchant names), so the
+/// user's single confirmation that "this VPA → this category" is high
+/// signal. Future transactions with the same VPA auto-tag immediately,
+/// AND a bulk update sweeps existing transactions with that VPA to the
+/// new category at confirmation time. Beats the 3-hit MerchantPattern
+/// for VPAs we recognize.
+model VpaPattern {
+  id              String   @id @default(cuid())
+  vpa             String   @unique
+  category        Category @relation(fields: [categoryId], references: [id])
+  categoryId      String
+  hitCount        Int      @default(1)
+  firstSeenAt     DateTime @default(now())
+  lastConfirmedAt DateTime @default(now())
 }
 
 // ============================================================

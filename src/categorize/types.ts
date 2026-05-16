@@ -111,6 +111,14 @@ export interface CategorizeContext {
   lookupMerchantPattern?: (
     merchantNormalized: string,
   ) => Promise<{ category: CategoryName; hitCount: number } | null>;
+  // Higher-priority sibling: VPA pattern. A single user confirmation of
+  // "this VPA → category" is enough to auto-tag every future transaction
+  // with the same VPA (VPAs are essentially unique-per-shop, much more
+  // so than merchant names which collide easily). Checked BEFORE
+  // lookupMerchantPattern.
+  lookupVpaPattern?: (
+    vpa: string,
+  ) => Promise<{ category: CategoryName } | null>;
 }
 
 export interface Enrichment {

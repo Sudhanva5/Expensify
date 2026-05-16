@@ -54,11 +54,24 @@ export async function categorize(
   const signals: CategorizationSignal[] = [];
   const vpaShape: VpaShape = tx.vpa ? classifyVpa(tx.vpa) : 'unknown';
 
-  // Pattern-learning shortcut — if the user has confirmed the SAME merchant
-  // tagged the SAME way ≥3 times, we auto-tag forever from then on. Highest
-  // confidence we emit. Runs before the alias table so user-trained
-  // categorization wins over our hard-coded mappings (the user knows their
-  // habits better than we do).
+  // VPA-pattern shortcut — single user confirmation is enough. VPAs are
+  // unique per shop / per person so the signal is very high confidence.
+  // Runs FIRST so user-trained VPA mappings beat everything else
+  // (including aliases, which are seed data the user didn't author).
+  if (ctx.lookupVpaPattern && tx.vpa) {
+    const vpaHit = await ctx.lookupVpaPattern(tx.vpa);
+    if (vpaHit) {
+      signals.push({
+        source: 'merchant_pattern',
+        category: vpaHit.category,
+        confidence: 0.99,
+        details: `VPA pattern: ${tx.vpa} → ${vpaHit.category}`,
+      });
+    }
+  }
+
+  // Merchant-name pattern (3-hit threshold). Lower priority than the
+  // VPA pattern because merchant names collide far more easily.
   if (ctx.lookupMerchantPattern) {
     const patternHit = await ctx.lookupMerchantPattern(merchantNormalized);
     if (patternHit) {

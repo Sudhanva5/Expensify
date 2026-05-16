@@ -3,6 +3,7 @@
 import { listMerchantAliases, listAutopayAliases } from './aliases.js';
 import { listEnabledRules } from './userRules.js';
 import { findActivePattern } from './merchantPatterns.js';
+import { findVpaPattern } from './vpaPatterns.js';
 import { ROUTING_PREFIXES } from '../categorize/seed.js';
 import type { CategorizeContext } from '../categorize/types.js';
 
@@ -19,5 +20,6 @@ export async function buildCategorizeContextFromDb(): Promise<CategorizeContext>
     routingPrefixes: ROUTING_PREFIXES,
     rules,
     lookupMerchantPattern: findActivePattern,
+    lookupVpaPattern: findVpaPattern,
   };
 }
