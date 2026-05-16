@@ -304,6 +304,17 @@ final class ContactsService {
         guard transaction.direction == .out else { return nil }
         guard transaction.instrument.hasPrefix("account_") else { return nil }
 
+        // --- Pass 0: merchant-VPA guard ----------------------------------
+        // Q-code Yes Bank (q\d+@ybl), paytmqr*, ok*biz handles, etc. are
+        // BUSINESS VPAs — a shop, not a person. Contact matching here
+        // produces silly false positives like "SURENDRA SHETTY" (a momos
+        // shop on q454981412@ybl) being overlaid by a contact named
+        // "Shet" simply because the compact strings share four letters.
+        // No merchant VPA should ever pull a contact photo or name.
+        if let vpa = transaction.vpa, Self.isMerchantVpa(vpa) {
+            return nil
+        }
+
         // --- Pass 1: phone-based match -----------------------------------
         if let vpa = transaction.vpa,
            let phone = Self.phoneFromVpa(vpa),
@@ -312,88 +323,101 @@ final class ContactsService {
             return phoneCandidates[0]
         }
 
-        // --- Pass 2a: compact-form substring match ----------------------
-        // Catches the case where the VPA's local-part runs words
-        // together: `sagarprabhu251-1@okhdfcbank` against contact
-        // "Sagar Prabhu". Token overlap (Pass 2b) misses this because
-        // the contact has a space inside its display name. Strip every
-        // non-letter from both sides and check substring containment.
+        // --- Pass 2: strict name match -----------------------------------
         //
-        // Uniqueness guarded: accept only when exactly ONE contact
-        // matches. A common compact like "kumar" would otherwise pull
-        // in any "Ajay Kumar" / "Suresh Kumar" — better to fall through
-        // to token-overlap which handles the multi-Kumar case.
-        let queryCompact = Self.compactize(transaction.merchantRaw) +
-            Self.compactize(transaction.vpa.flatMap { vpa -> String? in
-                let at = vpa.firstIndex(of: "@") ?? vpa.endIndex
-                return String(vpa[..<at])
-            } ?? "")
-        if queryCompact.count >= 6 {
-            var compactHits: [Contact] = []
-            for c in allContacts {
-                let cc = Self.compactize(c.displayName)
-                if cc.count < 4 { continue }
-                if cc.contains(queryCompact) || queryCompact.contains(cc) {
-                    compactHits.append(c)
-                }
-            }
-            if compactHits.count == 1 { return compactHits[0] }
-        }
+        // The rule that prevents every false positive we've hit so far:
+        //
+        //   EVERY meaningful token in the bank's payee text (merchantRaw)
+        //   MUST be present in the contact's display name. The VPA local-
+        //   part can contribute additional words, but those only act as
+        //   tiebreakers — they cannot pull in a contact whose name does
+        //   not match what the bank said.
+        //
+        // Why this matters:
+        //
+        //   "SNEHA R" + vpa `s.neha2003rajesh@okhdfcbank`
+        //     merchant tokens = {"sneha"} (R is 1-char, filtered)
+        //     vpa tokens      = {"neha", "rajesh"}
+        //     "Sneha Babluu"  → must contain "sneha" → YES → score 10
+        //     "Rajesh"        → must contain "sneha" → NO  → REJECT
+        //     winner: Sneha Babluu ✓ (previously: Rajesh, via compact
+        //                              substring on the VPA's tail)
+        //
+        //   "SUDESH HEGDE" + vpa `sudeshhegde285@ybl`
+        //     merchant tokens = {"sudesh", "hegde"}
+        //     "Sudesh Hegde"  → contains both → score 20
+        //     "Sudesh Nitte"  → missing "hegde" → REJECT
+        //     winner: Sudesh Hegde (or nil if you don't have him saved) ✓
+        //
+        //   "SAGAR PRABHU" + vpa `sagarprabhu251-1@okhdfcbank`
+        //     merchant tokens = {"sagar", "prabhu"}
+        //     "Sagar Prabhu"  → both present → score 20 ✓
+        //
+        // Score formula: 10 × (merchant tokens matched) + (vpa tokens
+        // matched). The 10× weight ensures the bank's text dominates;
+        // vpa overlap only breaks ties between equally-strong matches.
 
-        // --- Pass 2b: token-score name match ------------------------------
-        // Union of tokens from the bank payee AND the VPA local-part.
-        // VPA local often carries the FULL name even when the bank
-        // truncated to "SNEHA R" — e.g. `s.neha2003rajesh@okhdfcbank`
-        // gives us "rajesh" too, which uniquely disambiguates.
-        var payeeTokens = Set(Self.nameTokens(transaction.merchantRaw))
+        let merchantTokens = Set(Self.nameTokens(transaction.merchantRaw))
+        guard !merchantTokens.isEmpty else { return nil }
+
+        var vpaTokens = Set<String>()
         if let vpa = transaction.vpa {
             let at = vpa.firstIndex(of: "@") ?? vpa.endIndex
             let local = String(vpa[..<at])
-            payeeTokens.formUnion(Self.nameTokens(local))
+            vpaTokens.formUnion(Self.nameTokens(local))
         }
-        guard !payeeTokens.isEmpty else { return nil }
+        vpaTokens.subtract(merchantTokens)
 
-        // Score every contact by token overlap with the union set.
-        var bestScore = 0
+        var bestScore = -1
         var topCandidates: [Contact] = []
         for contact in allContacts {
             let contactTokens = Set(Self.nameTokens(contact.displayName))
-            let overlap = payeeTokens.intersection(contactTokens).count
-            if overlap == 0 { continue }
-            if overlap > bestScore {
-                bestScore = overlap
+            let merchantOverlap = merchantTokens.intersection(contactTokens).count
+            // Strict gate: every merchant token must appear.
+            guard merchantOverlap == merchantTokens.count else { continue }
+            let vpaOverlap = vpaTokens.intersection(contactTokens).count
+            let score = merchantOverlap * 10 + vpaOverlap
+            if score > bestScore {
+                bestScore = score
                 topCandidates = [contact]
-            } else if overlap == bestScore {
+            } else if score == bestScore {
                 topCandidates.append(contact)
             }
         }
 
-        if bestScore == 0 { return nil }
-
-        // Multi-token unique top → safe match.
-        if bestScore >= 2 && topCandidates.count == 1 {
-            return topCandidates[0]
-        }
-
-        // Single-token best-overlap → only accept when the ONE matching
-        // token uniquely identifies a single contact across the whole
-        // address book. Otherwise it's ambiguous (e.g. multiple Snehas).
-        if bestScore == 1 && topCandidates.count == 1 {
-            return topCandidates[0]
-        }
-
+        // Only auto-attach when exactly one contact survives. Multiple
+        // candidates → ambiguous → leave the row showing its raw payee
+        // text so the user isn't shown the wrong person.
+        if topCandidates.count == 1 { return topCandidates[0] }
         return nil
     }
 
-    /// Lowercase + strip every non-letter. "Sagar Prabhu" → "sagarprabhu".
-    /// Used by Pass 2a to compare run-together VPA locals against contact
-    /// display names that contain a space.
-    private static func compactize(_ s: String) -> String {
-        s.unicodeScalars
-            .filter { CharacterSet.letters.contains($0) }
-            .map(String.init)
-            .joined()
-            .lowercased()
+    /// True for VPAs that belong to a shop/business, not a person. Mirrors
+    /// the backend's `classifyVpa('merchant')` logic without the round-trip:
+    /// Q-code Yes Bank `q\d+@ybl`, paytmqr* IDs, ok*biz handles, yespay
+    /// razorpay handles, etc. These should NEVER pull a contact photo
+    /// because they aren't people — overlaying a friend's name on a
+    /// momos shop is always wrong.
+    private static func isMerchantVpa(_ vpa: String) -> Bool {
+        let lower = vpa.lowercased()
+        guard let at = lower.lastIndex(of: "@") else { return false }
+        let local = String(lower[..<at])
+        let handle = String(lower[lower.index(after: at)...])
+
+        // Explicit business handles
+        let merchantHandles: Set<String> = [
+            "okbizaxis", "okbizhdfcbank", "okbizsbi", "okbizicici",
+            "yespay", "yespayrazor", "ptys", "pty",
+            "razorpay", "payu", "instamojo", "ccavenue",
+        ]
+        if merchantHandles.contains(handle) { return true }
+
+        // Local-part shape: q-prefix, paytm-id, gpay-id, swiggy-id, etc.
+        if local.range(of: #"^(q\d+|paytmqr\d+|paytm[\-.][a-z0-9]+|gpay[\-.][a-z0-9]+|upi[\-_]?[a-z0-9]+|swiggy|zomato|amazon|flipkart)"#,
+                       options: .regularExpression) != nil {
+            return true
+        }
+        return false
     }
 
     /// Normalize a name-ish string into its meaningful tokens. Strips
@@ -471,6 +495,10 @@ final class ContactsService {
     func fetchGooglePhotoIfNeeded(for tx: Transaction) async {
         guard tx.direction == .out else { return }
         guard let vpa = tx.vpa, !vpa.isEmpty else { return }
+        // Merchant VPAs are shops — never overlay a contact identity on
+        // them, even if Google has a contact whose name is a substring
+        // of the merchant text.
+        if Self.isMerchantVpa(vpa) { return }
         if googlePhotoByVpa[vpa] != nil { return }
         if googleNotFoundVpas.contains(vpa) { return }
         if googleInflight.contains(vpa) { return }
