@@ -265,16 +265,22 @@ final class ContactsService {
 
     // MARK: - Matching
 
-    /// Returns the contact a transaction was sent to. Two passes:
+    /// Returns the contact a transaction was sent to. Two-pass match:
     ///
     ///   1. **Phone match** (highest confidence): VPA's local part parses
-    ///      as a phone number that lives in the address book.
-    ///   2. **Multi-token name match** (medium confidence): the bank's
-    ///      payee text has ≥2 meaningful tokens (single-letter initials
-    ///      dropped), AND **exactly one** contact has all of those tokens
-    ///      in their display name. Returning nil on ambiguity is the
-    ///      whole point — it's what stopped "Sneha Bubbly" matching to
-    ///      "Sneha Appa" before.
+    ///      as a 10-digit phone number that lives in the address book.
+    ///
+    ///   2. **Token-score name match** (medium confidence): pulls name
+    ///      tokens from BOTH the bank payee (`merchantRaw`) AND the VPA
+    ///      local-part (so `s.neha2003rajesh@okhdfcbank` contributes
+    ///      "sneha" and "rajesh" beyond what the bank's truncated "SNEHA
+    ///      R" gives us). Scores each contact by how many of those
+    ///      tokens appear in their display name. The winner only
+    ///      matches when EITHER (a) score ≥ 2 with a unique top
+    ///      candidate, OR (b) score == 1 and that token is uniquely
+    ///      associated with a single contact in the address book.
+    ///      Returning nil on ambiguity is intentional — it's what
+    ///      stopped the "Sneha Bubbly → Sneha Appa" false-positive.
     ///
     /// Only runs for outbound UPI transactions from your bank account
     /// (`account_*` instrument). Credit-card transactions to a name look
@@ -291,26 +297,56 @@ final class ContactsService {
             return phoneCandidates[0]
         }
 
-        // --- Pass 2: strict multi-token name match -----------------------
-        let payeeTokens = Self.nameTokens(transaction.merchantRaw)
-        // Need at least 2 meaningful tokens — a single name like "SNEHA"
-        // is ambiguous against any address book that has multiple Snehas.
-        guard payeeTokens.count >= 2 else { return nil }
-
-        let payeeSet = Set(payeeTokens)
-        let nameCandidates = allContacts.filter { contact in
-            let contactSet = Set(Self.nameTokens(contact.displayName))
-            // Every payee token must appear in the contact's name set.
-            return payeeSet.isSubset(of: contactSet)
+        // --- Pass 2: token-score name match ------------------------------
+        // Union of tokens from the bank payee AND the VPA local-part.
+        // VPA local often carries the FULL name even when the bank
+        // truncated to "SNEHA R" — e.g. `s.neha2003rajesh@okhdfcbank`
+        // gives us "rajesh" too, which uniquely disambiguates.
+        var payeeTokens = Set(Self.nameTokens(transaction.merchantRaw))
+        if let vpa = transaction.vpa {
+            let at = vpa.firstIndex(of: "@") ?? vpa.endIndex
+            let local = String(vpa[..<at])
+            payeeTokens.formUnion(Self.nameTokens(local))
         }
-        // Match only on uniqueness — if two contacts both satisfy, drop
-        // the match rather than guess.
-        return nameCandidates.count == 1 ? nameCandidates[0] : nil
+        guard !payeeTokens.isEmpty else { return nil }
+
+        // Score every contact by token overlap with the union set.
+        var bestScore = 0
+        var topCandidates: [Contact] = []
+        for contact in allContacts {
+            let contactTokens = Set(Self.nameTokens(contact.displayName))
+            let overlap = payeeTokens.intersection(contactTokens).count
+            if overlap == 0 { continue }
+            if overlap > bestScore {
+                bestScore = overlap
+                topCandidates = [contact]
+            } else if overlap == bestScore {
+                topCandidates.append(contact)
+            }
+        }
+
+        if bestScore == 0 { return nil }
+
+        // Multi-token unique top → safe match.
+        if bestScore >= 2 && topCandidates.count == 1 {
+            return topCandidates[0]
+        }
+
+        // Single-token best-overlap → only accept when the ONE matching
+        // token uniquely identifies a single contact across the whole
+        // address book. Otherwise it's ambiguous (e.g. multiple Snehas).
+        if bestScore == 1 && topCandidates.count == 1 {
+            return topCandidates[0]
+        }
+
+        return nil
     }
 
-    /// Normalize a name into its meaningful tokens. Lowercases, strips
-    /// punctuation, drops single-character tokens (initials like "R" or
-    /// "K" are too noisy to disambiguate on).
+    /// Normalize a name-ish string into its meaningful tokens. Strips
+    /// non-letter characters (digits, punctuation), lowercases, and
+    /// drops single-letter tokens because initials like "R" / "S" are
+    /// too noisy to disambiguate on. Used for BOTH contact display
+    /// names AND VPA local-parts.
     private static func nameTokens(_ s: String) -> [String] {
         s.unicodeScalars
             .map { scalar -> Character in

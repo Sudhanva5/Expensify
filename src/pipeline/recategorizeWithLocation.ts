@@ -30,6 +30,7 @@ import {
   mapPlacesTypesToCategory,
   PLACES_TYPE_CONFIDENCE,
 } from '../services/placesTypeMapper.js';
+import { detectOnlineMerchant } from '../categorize/onlineMerchant.js';
 import { checkBudgetForCategory } from './budgetAlerts.js';
 
 export type RecategorizeOutcome =
@@ -63,6 +64,20 @@ export async function recategorizeWithLocation(opts: {
   }
   if (tx.direction !== 'out') {
     return { updated: false, reason: 'not_outflow' };
+  }
+  // Online-merchant guard — DUPLICATED here on purpose. The check in
+  // processGmailMessage prevents NEW online-merchant rows from being
+  // sent through this pipeline at all, but historical rows already
+  // have GPS uploaded. If a backfill or manual re-run calls
+  // recategorizeWithLocation on a "NAME-CHEAP.COM*" row, we'd happily
+  // map it to the nearest physical grocery store — exactly the bug
+  // we fixed before. Belt-and-suspenders: bail out here too.
+  const onlineCheck = detectOnlineMerchant(tx.merchantRaw);
+  if (onlineCheck.isOnline) {
+    return {
+      updated: false,
+      reason: `online_merchant_${onlineCheck.reason}`,
+    };
   }
 
   // Look up nearby places. 10m is intentionally tight — wider radii were
