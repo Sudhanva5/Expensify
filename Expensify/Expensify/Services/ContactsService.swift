@@ -47,6 +47,18 @@ final class ContactsService {
     var authorization: Authorization = .notDetermined
     var lastError: String? = nil
 
+    /// VPAs the user has explicitly pinned to a specific iPhone contact.
+    /// Mapping is `vpa → CNContact.identifier`. Persisted in UserDefaults
+    /// (single-user V1; contacts never leave the device so the same
+    /// privacy contract holds). A pin always beats the algorithm:
+    /// `match(for:)` returns the pinned contact verbatim, skipping the
+    /// strict-token rule that legitimately rejects "Sagar Nitte" against
+    /// the bank's "SAGAR PRABHU". This is the explicit-override valve
+    /// for everything the algorithm can't infer (NPCI's `VPA → phone`
+    /// mapping is what GPay/Cred use; we can't legally call it).
+    private var pinnedVpaToContactId: [String: String] = [:]
+    private let pinsDefaultsKey = "ContactsService.pinnedVpaToContactId.v1"
+
     /// Diagnostic counts, surfaced via `diagnostics` for in-app debugging.
     /// Updated on every reload(). Lets the user see if photo prefetch is
     /// actually populating cache without needing Xcode console.
@@ -110,6 +122,42 @@ final class ContactsService {
     private var googleInflight: Set<String> = []
     /// Display name returned by Google for the VPA (used by detail sheet).
     private var googleNameByVpa: [String: String] = [:]
+
+    /// Hydrate pins from UserDefaults. Called from the app delegate or
+    /// the contacts-service init path so pinned overrides survive a
+    /// relaunch.
+    func loadPinsFromDefaults() {
+        if let dict = UserDefaults.standard.dictionary(forKey: pinsDefaultsKey) as? [String: String] {
+            pinnedVpaToContactId = dict
+        }
+    }
+
+    /// Persist pins back out. Called on every change.
+    private func savePins() {
+        UserDefaults.standard.set(pinnedVpaToContactId, forKey: pinsDefaultsKey)
+    }
+
+    /// Tell the system: "every transaction with this VPA is this person."
+    /// Future matches return the pinned contact regardless of token rules.
+    /// Idempotent — overwrites any existing pin for the same VPA.
+    func pin(vpa: String, toContactId contactId: String) {
+        pinnedVpaToContactId[vpa] = contactId
+        savePins()
+    }
+
+    /// Remove the pin for this VPA, falling back to algorithmic matching.
+    func unpin(vpa: String) {
+        pinnedVpaToContactId.removeValue(forKey: vpa)
+        savePins()
+    }
+
+    /// What's currently pinned for this VPA? Returns nil if no pin or if
+    /// the pinned contact id no longer exists in the address book (the
+    /// user may have deleted them from iOS Contacts).
+    func pinnedContact(for vpa: String) -> Contact? {
+        guard let id = pinnedVpaToContactId[vpa] else { return nil }
+        return allContacts.first(where: { $0.id == id })
+    }
 
     /// Fetch authorization status from iOS without prompting. Cheap; safe
     /// to call from view onAppear.
@@ -304,6 +352,16 @@ final class ContactsService {
         guard transaction.direction == .out else { return nil }
         guard transaction.instrument.hasPrefix("account_") else { return nil }
 
+        // --- Pass -1: user-pinned override -------------------------------
+        // The user explicitly told us "this VPA is this person." Honour
+        // it even for merchant-VPAs (some shops were saved as personal
+        // contacts) and even when token overlap is zero. This is the
+        // single source of truth that NPCI lookups would have given us
+        // had we been a licensed UPI PSP.
+        if let vpa = transaction.vpa, let pinned = pinnedContact(for: vpa) {
+            return pinned
+        }
+
         // --- Pass 0: merchant-VPA guard ----------------------------------
         // Q-code Yes Bank (q\d+@ybl), paytmqr*, ok*biz handles, etc. are
         // BUSINESS VPAs — a shop, not a person. Contact matching here
@@ -391,6 +449,11 @@ final class ContactsService {
         if topCandidates.count == 1 { return topCandidates[0] }
         return nil
     }
+
+    /// Public mirror of `isMerchantVpa` so views (CategoryPickerSheet) can
+    /// hide affordances that don't apply to merchant VPAs without having
+    /// to round-trip through the backend.
+    static func isMerchantVpaPublic(_ vpa: String) -> Bool { isMerchantVpa(vpa) }
 
     /// True for VPAs that belong to a shop/business, not a person. Mirrors
     /// the backend's `classifyVpa('merchant')` logic without the round-trip:

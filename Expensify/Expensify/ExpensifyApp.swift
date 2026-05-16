@@ -28,6 +28,10 @@ struct ExpensifyApp: App {
                 .environment(contactsService)
                 .task {
                     await budgetStore.refresh()
+                    // Hydrate VPA→contact pins from UserDefaults BEFORE
+                    // the contacts index is built, so the first call to
+                    // match(for:) already honours user overrides.
+                    contactsService.loadPinsFromDefaults()
                     // Prompt for contacts access on first launch — also
                     // builds the in-memory index on subsequent launches.
                     await contactsService.requestAccessAndLoad()
