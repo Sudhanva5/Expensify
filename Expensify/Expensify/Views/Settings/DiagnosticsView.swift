@@ -114,7 +114,7 @@ struct DiagnosticsView: View {
                     .foregroundStyle(AppColor.textTertiary)
                 NotificationBannerPreview(
                     title: previewTitle,
-                    body: previewBody
+                    message: previewBody
                 )
             }
             .padding(.vertical, 6)
@@ -299,7 +299,7 @@ struct DiagnosticsView: View {
 /// renders the alert. Static; doesn't actually fire APNs.
 private struct NotificationBannerPreview: View {
     let title: String
-    let body: String
+    let message: String
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -324,7 +324,7 @@ private struct NotificationBannerPreview: View {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AppColor.textPrimary)
-                Text(body)
+                Text(message)
                     .font(.system(size: 13))
                     .foregroundStyle(AppColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
