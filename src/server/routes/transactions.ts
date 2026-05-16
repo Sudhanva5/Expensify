@@ -148,7 +148,11 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'Invalid body', details: parsed.error.format() });
       }
 
-      const updates: { status?: 'pending_review' | 'resolved'; categoryId?: string } = {};
+      const updates: {
+        status?: 'pending_review' | 'resolved';
+        categoryId?: string;
+        matchedRuleId?: string | null;
+      } = {};
 
       if (parsed.data.status !== undefined) {
         updates.status = parsed.data.status;
@@ -162,6 +166,11 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
           return reply.code(400).send({ error: `Unknown category: ${parsed.data.category}` });
         }
         updates.categoryId = cat.id;
+        // The user just chose a category by hand. If a user-rule had
+        // tagged this row before, that rule id is no longer relevant —
+        // clear it so analytics and the matched-rule audit don't keep
+        // attributing this confirmation to a rule the user overrode.
+        updates.matchedRuleId = null;
       }
 
       if (Object.keys(updates).length === 0) {

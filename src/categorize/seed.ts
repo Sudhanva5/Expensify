@@ -46,6 +46,13 @@ export const SEED_ALIASES: AliasEntry[] = [
   { pattern: 'EASEMYTRIP', matchType: 'substring', canonical: 'EaseMyTrip', category: 'Travel' },
   { pattern: 'AIRBNB', matchType: 'substring', canonical: 'Airbnb', category: 'Travel' },
   { pattern: 'OYO', matchType: 'substring', canonical: 'OYO', category: 'Travel' },
+  { pattern: 'REDBUS', matchType: 'substring', canonical: 'RedBus', category: 'Travel' },
+  // HDFC sometimes writes redBus debits as "REDBUS PVT LTD" or the
+  // routing-tier shows "PINELABS REDBUS"; substring catches both.
+  { pattern: 'ROYAL RICH INDIA', matchType: 'substring', canonical: 'Royal Rich India (Bus)', category: 'Travel' },
+  { pattern: 'KSRTC', matchType: 'substring', canonical: 'KSRTC', category: 'Travel' },
+  { pattern: 'APSRTC', matchType: 'substring', canonical: 'APSRTC', category: 'Travel' },
+  { pattern: 'TSRTC', matchType: 'substring', canonical: 'TSRTC', category: 'Travel' },
 
   // ---- Subscriptions: AI / Dev tools ------------------------------------
   { pattern: 'ANTHROPIC', matchType: 'substring', canonical: 'Anthropic', category: 'Subscriptions' },

@@ -43,10 +43,13 @@ export async function devicesRoute(app: FastifyInstance): Promise<void> {
 
     const results = await Promise.all(
       devices.map(async (d) => {
+        // Title/body MUST stay in sync with the literals shown in
+        // DiagnosticsView.notificationsSection — the iOS preview is
+        // promising the user exactly this banner.
         const ok = await sendVisiblePush({
           apnsToken: d.apnsToken,
-          title: 'Test notification',
-          body: 'If you see this, push delivery is working end-to-end.',
+          title: 'Test from Expensify',
+          body: 'Your budget alert pipeline is wired up correctly. Real alerts will land here.',
           payload: { kind: 'test_push', sentAt: new Date().toISOString() },
         });
         return {

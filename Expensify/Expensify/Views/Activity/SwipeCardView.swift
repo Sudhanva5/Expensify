@@ -99,10 +99,13 @@ struct SwipeCardView: View {
                         .foregroundStyle(AppColor.textPrimary)
                         .lineLimit(2)
                     if let vpa = item.transaction.vpa {
+                        // VPAs are diagnostic — keep them whole so the
+                        // user can tell `q454981412@ybl` from
+                        // `q454981410@ybl` at a glance.
                         Text(vpa)
                             .font(AppFont.caption)
                             .foregroundStyle(AppColor.textTertiary)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer(minLength: 0)

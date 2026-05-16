@@ -140,6 +140,7 @@ const SOURCE_MERCHANT_KEYWORDS: Record<string, RegExp> = {
   uber: /uber/i,
   cab: /uber|ola|rapido/i,
   travel: /makemytrip|goibibo|cleartrip|easemytrip|irctc|indigo|akasa|vistara/i,
+  redbus: /redbus|redb|royal\s*rich|volvo|sleeper|seater|ksrtc|ktdc|tsrtc|apsrtc/i,
   airbnb: /airbnb/i,
   shopping: /amazon|flipkart|myntra|jiomart/i,
   grocery: /bigbasket|blinkit|zepto|dmart|reliance/i,

@@ -62,10 +62,21 @@ export async function recategorizeWithLocation(opts: {
   });
   if (!tx) return { updated: false, reason: 'transaction_not_found' };
 
-  // Already-confident rows don't need re-tagging. Inflows / autopays don't
-  // have a meaningful "where did this happen" anyway.
-  if (tx.status === 'resolved' && tx.signalSource === 'alias') {
-    return { updated: false, reason: 'already_alias_resolved' };
+  // Already-confident rows don't need re-tagging. Skip any resolved row
+  // whose signal source we trust at auto-tag confidence — alias,
+  // autopay alias, an explicit merchant or VPA pattern hit, a user rule,
+  // or a previously-claimed Places suggestion. Without this, a backfill
+  // sweep or a manual GPS re-upload could overwrite a confirmation the
+  // user has already made.
+  const TRUSTED_SOURCES = new Set([
+    'alias',
+    'autopay_alias',
+    'merchant_pattern',
+    'user_rule',
+    'places',
+  ]);
+  if (tx.status === 'resolved' && tx.signalSource && TRUSTED_SOURCES.has(tx.signalSource)) {
+    return { updated: false, reason: `already_resolved_${tx.signalSource}` };
   }
   if (tx.direction !== 'out') {
     return { updated: false, reason: 'not_outflow' };

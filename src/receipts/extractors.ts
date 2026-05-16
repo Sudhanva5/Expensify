@@ -346,6 +346,9 @@ export function pickExtractor(fromAddress: string): {
   if (addr.includes('makemytrip.') || addr.includes('goibibo.') || addr.includes('cleartrip.')) {
     return { source: 'travel', extract: extractUniversal };
   }
+  if (addr.includes('redbus.') || addr.includes('@redbus')) {
+    return { source: 'redbus', extract: extractUniversal };
+  }
   if (addr.includes('airbnb.')) {
     return { source: 'airbnb', extract: extractUniversal };
   }
@@ -375,6 +378,8 @@ export const RECEIPT_SENDER_DOMAINS = [
   'makemytrip.com',
   'goibibo.com',
   'cleartrip.com',
+  'redbus.in',
+  'redbus.com',
   'airbnb.com',
   'flipkart.com',
   'myntra.com',

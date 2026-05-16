@@ -124,10 +124,14 @@ struct ContactMatchPreview: View {
                         .foregroundStyle(AppColor.textPrimary)
                         .lineLimit(1)
                     if let vpa = tx.vpa {
+                        // No lineLimit: VPAs are read end-to-end (the
+                        // bank uses `q454981412@ybl` vs `q454981410@ybl`
+                        // and we don't want a "..." ellipsis hiding the
+                        // distinguishing tail). Let it wrap.
                         Text(vpa)
                             .font(AppFont.caption.monospaced())
                             .foregroundStyle(AppColor.textTertiary)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer()
