@@ -144,6 +144,7 @@ struct ReceiptCard: View {
     private var sourceDisplay: String {
         switch receipt.source.lowercased() {
         case "swiggy": return "Swiggy"
+        case "instamart": return "Swiggy Instamart"
         case "zomato": return "Zomato"
         case "amazon": return "Amazon"
         case "bookmyshow": return "BookMyShow"

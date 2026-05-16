@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   extractUniversal,
   extractSwiggy,
+  extractInstamart,
   pickExtractor,
   isReceiptSender,
 } from '../../src/receipts/extractors.js';
@@ -104,6 +105,70 @@ describe('extractSwiggy', () => {
 
   it('returns null for marketing-only Swiggy email (no bill details)', () => {
     const r = extractSwiggy('Get 20% off your next order! ORDER JOURNEY...');
+    expect(r).toBeNull();
+  });
+});
+
+describe('extractInstamart', () => {
+  // Realistic Instamart receipt body (HTML-stripped to plain text).
+  const instamartBody = `
+    Greetings from Instamart 👋
+    Your Instamart order id: 237274058243810 was successfully delivered.
+    Deliver To:
+    402, 834 Sri Renuka Yellamma Devi Nilaya Near Ratnadeep, Kasavanahall 560035 Bengaluru, Karnataka 560035, India
+    Order Items
+    1 x Ariel Lavender Power Gel Liquid Detergent Top Load ₹536.00
+    Order Summary
+    Item Bill ₹536.00
+    Handling Fee ₹11.00
+    Delivery Partner Fee ₹0.00
+    Grand Total ₹547.00
+  `;
+
+  it('extracts grand total', () => {
+    const r = extractInstamart(instamartBody);
+    expect(r).not.toBeNull();
+    expect(r!.amountInrMinor).toBe(54700n);
+  });
+
+  it('extracts order id', () => {
+    const r = extractInstamart(instamartBody);
+    expect(r!.orderId).toBe('237274058243810');
+  });
+
+  it('extracts items', () => {
+    const r = extractInstamart(instamartBody);
+    expect(r!.items).toHaveLength(1);
+    expect(r!.items![0]).toEqual({
+      name: 'Ariel Lavender Power Gel Liquid Detergent Top Load',
+      qty: 1,
+      priceInr: 536,
+    });
+  });
+
+  it('extracts fees, skipping "Item Bill" line', () => {
+    const r = extractInstamart(instamartBody);
+    expect(r!.fees!.map((f) => f.name)).toEqual([
+      'Handling Fee',
+      'Delivery Partner Fee',
+    ]);
+    expect(r!.fees!.find((f) => f.name === 'Handling Fee')?.amountInr).toBe(11);
+  });
+
+  it('extracts delivery address into meta', () => {
+    const r = extractInstamart(instamartBody);
+    const meta = r!.meta as { deliveryAddress?: string };
+    expect(meta.deliveryAddress).toContain('Sri Renuka Yellamma');
+  });
+
+  it('sets sourceOverride to "instamart"', () => {
+    const r = extractInstamart(instamartBody);
+    expect(r!.sourceOverride).toBe('instamart');
+    expect(r!.parserVersion).toBe('instamart.v1');
+  });
+
+  it('returns null for non-Instamart bodies', () => {
+    const r = extractInstamart('Random email body without Instamart markers');
     expect(r).toBeNull();
   });
 });

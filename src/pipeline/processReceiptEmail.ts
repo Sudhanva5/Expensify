@@ -72,10 +72,14 @@ export async function processReceiptEmail(msg: ExtractedMessage): Promise<Receip
     receivedAt: msg.receivedAt,
   });
 
+  // Some parsers (e.g. Instamart inside the swiggy.in chain) reclassify
+  // the source based on body content. Honour the override when set.
+  const finalSource = extracted.sourceOverride ?? source;
+
   const created = await prisma.emailReceipt.create({
     data: {
       gmailMessageId: msg.id,
-      source,
+      source: finalSource,
       subject: msg.subject,
       snippet: msg.snippet,
       receivedAt: msg.receivedAt,
@@ -100,7 +104,7 @@ export async function processReceiptEmail(msg: ExtractedMessage): Promise<Receip
     kind: 'processed',
     gmailMessageId: msg.id,
     receiptId: created.id,
-    source,
+    source: finalSource,
     amountInrMinor: extracted.amountInrMinor,
     orderId: extracted.orderId,
     itemsCount: extracted.items?.length ?? 0,

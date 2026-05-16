@@ -18,6 +18,10 @@ export interface ExtractedReceipt {
   fees: ReceiptFee[] | null;
   meta: Record<string, unknown> | null;
   parserVersion: string;
+  /// When set, overrides the source returned by `pickExtractor`. Used by
+  /// Swiggy's Instamart parser to relabel rows as source='instamart'
+  /// (they share the @swiggy.in sender but render very differently).
+  sourceOverride?: string;
 }
 
 export interface ReceiptItem {
@@ -193,6 +197,112 @@ export function extractSwiggy(plainText: string): ExtractedReceipt | null {
   return result;
 }
 
+// === Swiggy Instamart parser ==========================================
+
+/**
+ * Parse a Swiggy Instamart receipt's plain-text body. Instamart shares
+ * the @swiggy.in sender with food orders but renders very differently:
+ * no `ORDER JOURNEY` section, no `Paid Via Bank` total — instead the
+ * structure is `Order Items`, `Order Summary`, `Grand Total`.
+ *
+ * Section markers anchored on:
+ *   - `Instamart order id: NNNN`
+ *   - `Order Items` … `Order Summary`  (item lines: `N x <name> ₹<amt>`)
+ *   - `Order Summary` … `Grand Total`  (fee lines)
+ *   - `Grand Total ₹<amt>`
+ *
+ * Also pulls the `Deliver To:` address into `meta.deliveryAddress`.
+ *
+ * Returns null when the body doesn't look like an Instamart receipt
+ * (caller chains to the food parser, then universal).
+ */
+export function extractInstamart(plainText: string): ExtractedReceipt | null {
+  // Sanity check — these three markers are stable across Instamart
+  // emails seen so far. If any are missing, this isn't an Instamart
+  // receipt (might be promo, order-placed status, etc.).
+  const hasOrderItems = /Order\s+Items/i.test(plainText);
+  const hasOrderSummary = /Order\s+Summary/i.test(plainText);
+  const hasGrandTotal = /Grand\s+Total/i.test(plainText);
+  const hasInstamartLabel = /Instamart/i.test(plainText);
+  if (!hasOrderItems || !hasOrderSummary || !hasGrandTotal || !hasInstamartLabel) {
+    return null;
+  }
+
+  const result: ExtractedReceipt = {
+    amountInrMinor: null,
+    orderId: null,
+    items: [],
+    fees: [],
+    meta: {},
+    parserVersion: 'instamart.v1',
+    sourceOverride: 'instamart',
+  };
+
+  // Order ID — "Instamart order id: 237274058243810" (case-insensitive)
+  const orderRe = /(?:Instamart\s+)?order\s+id\s*:?\s*(\d{8,})/i;
+  const orderMatch = plainText.match(orderRe);
+  if (orderMatch?.[1]) result.orderId = orderMatch[1];
+
+  // Grand Total — "Grand Total ₹547.00"
+  const totalRe = /Grand\s+Total\s*₹?\s*([0-9][0-9,]*(?:\.\d{1,2})?)/i;
+  const totalMatch = plainText.match(totalRe);
+  if (totalMatch?.[1]) {
+    const n = Number(totalMatch[1].replace(/,/g, ''));
+    if (Number.isFinite(n) && n > 0) {
+      result.amountInrMinor = BigInt(Math.round(n * 100));
+    }
+  }
+
+  // Items between "Order Items" and "Order Summary". Each item line:
+  //   "1 x Ariel Lavender Power Gel Liquid Detergent Top Load   ₹536.00"
+  const itemsMatch = plainText.match(/Order\s+Items\s*([\s\S]*?)Order\s+Summary/i);
+  if (itemsMatch?.[1]) {
+    const itemRe =
+      /(\d+)\s*x\s+([A-Za-z][^₹\n]+?)\s*₹\s*([0-9][0-9,]*(?:\.\d{1,2})?)/g;
+    for (const m of itemsMatch[1].matchAll(itemRe)) {
+      const qty = Number(m[1]);
+      const name = (m[2] ?? '').trim();
+      const priceInr = Number((m[3] ?? '').replace(/,/g, ''));
+      if (!name || !Number.isFinite(qty) || !Number.isFinite(priceInr)) continue;
+      result.items!.push({ name, qty, priceInr });
+    }
+  }
+
+  // Fees between "Order Summary" and "Grand Total". Each line:
+  //   "Handling Fee   ₹11.00"
+  //   "Delivery Partner Fee   ₹0.00"
+  //   "Item Bill   ₹536.00"  ← skip; this is the items total
+  const feesMatch = plainText.match(/Order\s+Summary\s*([\s\S]*?)Grand\s+Total/i);
+  if (feesMatch?.[1]) {
+    const feeRe = /([A-Za-z][^₹\n]+?)\s*₹\s*([0-9][0-9,]*(?:\.\d{1,2})?)/g;
+    for (const m of feesMatch[1].matchAll(feeRe)) {
+      const name = (m[1] ?? '').trim();
+      const amount = Number((m[2] ?? '').replace(/,/g, ''));
+      if (!name || !Number.isFinite(amount)) continue;
+      // "Item Bill" is the sum of item prices; not a real fee.
+      if (/^Item\s+Bill$/i.test(name)) continue;
+      result.fees!.push({ name, amountInr: amount });
+    }
+  }
+
+  // Delivery address — "Deliver To:" followed by the address line.
+  const addrMatch = plainText.match(/Deliver\s+To\s*:?\s*([^\n]{10,})/i);
+  if (addrMatch?.[1]) {
+    result.meta!['deliveryAddress'] = addrMatch[1].trim();
+  }
+
+  // Reject if NOTHING useful came out — caller falls through to universal.
+  if (
+    result.amountInrMinor === null &&
+    result.orderId === null &&
+    result.items!.length === 0
+  ) {
+    return null;
+  }
+
+  return result;
+}
+
 // === Sender → extractor router =========================================
 
 /**
@@ -207,7 +317,13 @@ export function pickExtractor(fromAddress: string): {
   if (addr.includes('swiggy.in') || addr.includes('@swiggy.')) {
     return {
       source: 'swiggy',
-      extract: (text) => extractSwiggy(text) ?? extractUniversal(text),
+      // Two Swiggy formats: food orders (ORDER JOURNEY / BILL DETAILS /
+      // Paid Via Bank) and Instamart (Order Items / Order Summary /
+      // Grand Total). Try food first, then Instamart, then universal
+      // fallback. Instamart's parser sets sourceOverride='instamart'
+      // so iOS can render the right brand label.
+      extract: (text) =>
+        extractSwiggy(text) ?? extractInstamart(text) ?? extractUniversal(text),
     };
   }
   // Other merchants currently use the universal extractor. Add per-
