@@ -85,6 +85,17 @@ export async function recategorizeWithLocation(opts: {
     };
   }
 
+  // P2P guard — the GPay-rail equivalent of the online-merchant guard.
+  // Personal-shape VPAs (sneha.r@oksbi, sagarprabhu251-1@okhdfcbank,
+  // 9876543210@ybl) are person-to-person UPI transfers, not visits to
+  // a physical storefront. Without this, a ₹1 test payment to a friend
+  // would happily snap to the nearest ice-cream shop and rename the
+  // row "Apsara Ice Creams" — exactly the bug we just hit. Refuse to
+  // Places-resolve any personal VPA, full stop.
+  if (tx.vpa && classifyVpa(tx.vpa) === 'personal') {
+    return { updated: false, reason: 'p2p_vpa' };
+  }
+
   // Re-evaluate user rules with location context. Rules can carry a
   // `locationWithinRadius` condition (e.g. "near my office") that's
   // impossible to evaluate at ingest. Now that we have the iPhone's

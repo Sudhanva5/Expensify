@@ -129,10 +129,13 @@ export interface CategorizeContext {
   // "this VPA → category" is enough to auto-tag every future transaction
   // with the same VPA (VPAs are essentially unique-per-shop, much more
   // so than merchant names which collide easily). Checked BEFORE
-  // lookupMerchantPattern.
+  // lookupMerchantPattern. Also returns an optional `merchantName` — the
+  // Places-resolved storefront name claimed for this VPA via the
+  // apply-place flow, which the orchestrator uses to override the
+  // bank's raw payee text on future debits.
   lookupVpaPattern?: (
     vpa: string,
-  ) => Promise<{ category: CategoryName } | null>;
+  ) => Promise<{ category: CategoryName; merchantName: string | null } | null>;
 }
 
 export interface Enrichment {

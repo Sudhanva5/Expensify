@@ -15,17 +15,20 @@
 import { prisma } from './client.js';
 import type { CategoryName } from '../categorize/types.js';
 
-/** Look up an auto-tag category for a VPA. Single hit is enough. */
+/** Look up an auto-tag category + remembered merchant name for a VPA. */
 export async function findVpaPattern(
   vpa: string | null,
-): Promise<{ category: CategoryName } | null> {
+): Promise<{ category: CategoryName; merchantName: string | null } | null> {
   if (!vpa) return null;
   const row = await prisma.vpaPattern.findUnique({
     where: { vpa },
     include: { category: { select: { name: true } } },
   });
   if (!row) return null;
-  return { category: row.category.name as CategoryName };
+  return {
+    category: row.category.name as CategoryName,
+    merchantName: row.merchantName,
+  };
 }
 
 /**
@@ -45,8 +48,13 @@ export async function recordVpaConfirmation(args: {
   /// Transaction the user just confirmed. Excluded from the bulk update
   /// (it was already updated via the PATCH handler).
   excludeTransactionId: string;
+  /// Optional Places-resolved display name to memorize for this VPA.
+  /// When supplied, future transactions on this VPA pick up the name
+  /// during initial categorization — no second Places trip needed.
+  /// Null preserves whatever name was previously memorized.
+  merchantName?: string | null;
 }): Promise<{ patternHits: number; rowsBackfilled: number }> {
-  const { vpa, categoryId, excludeTransactionId } = args;
+  const { vpa, categoryId, excludeTransactionId, merchantName } = args;
 
   // Upsert the pattern.
   const existing = await prisma.vpaPattern.findUnique({ where: { vpa } });
@@ -58,10 +66,21 @@ export async function recordVpaConfirmation(args: {
           hitCount:
             existing.categoryId === categoryId ? existing.hitCount + 1 : 1,
           lastConfirmedAt: new Date(),
+          // Only overwrite merchantName when the caller explicitly
+          // supplies one (e.g., apply-place). A category-only PATCH
+          // shouldn't wipe a previously-claimed Places name.
+          ...(merchantName !== undefined && merchantName !== null
+            ? { merchantName }
+            : {}),
         },
       })
     : await prisma.vpaPattern.create({
-        data: { vpa, categoryId, hitCount: 1 },
+        data: {
+          vpa,
+          categoryId,
+          hitCount: 1,
+          merchantName: merchantName ?? null,
+        },
       });
 
   // Bulk-update every other transaction with the same VPA. We touch

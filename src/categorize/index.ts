@@ -25,7 +25,9 @@ export async function categorize(
   ctx: CategorizeContext,
   _enrichment: Enrichment = {},
 ): Promise<CategorizationResult> {
-  const merchantNormalized = stripRoutingPrefix(tx.merchantRaw, ctx.routingPrefixes);
+  // Default: strip routing-prefix garbage from the bank's payee text.
+  // Overridden later if a VPA pattern remembers a Places-resolved name.
+  let merchantNormalized = stripRoutingPrefix(tx.merchantRaw, ctx.routingPrefixes);
 
   // UPI credits (incoming money) are essentially always P2P transfers from
   // another person. Auto-resolve without running the full pipeline — there's
@@ -67,6 +69,13 @@ export async function categorize(
         confidence: 0.99,
         details: `VPA pattern: ${tx.vpa} → ${vpaHit.category}`,
       });
+      // If the user previously claimed a Places suggestion for this VPA,
+      // surface that storefront name immediately on the new debit instead
+      // of the bank's raw payee. Saves the user from having to re-tap
+      // "Sri Vishnu Brindavana" every visit.
+      if (vpaHit.merchantName) {
+        merchantNormalized = vpaHit.merchantName;
+      }
     }
   }
 

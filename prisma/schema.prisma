@@ -163,6 +163,11 @@ model VpaPattern {
   hitCount        Int      @default(1)
   firstSeenAt     DateTime @default(now())
   lastConfirmedAt DateTime @default(now())
+  /// Display name to apply to future transactions on this VPA. Populated
+  /// when the user claims a Places suggestion via /transactions/:id/apply-place.
+  /// Null when the only confirmation source was a category PATCH without
+  /// a Places resolution (the bank's raw payee stays in that case).
+  merchantName    String?
 }
 
 // ============================================================

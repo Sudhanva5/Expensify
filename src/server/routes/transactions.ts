@@ -298,12 +298,16 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
 
         // Also record VPA + merchant patterns so future transactions
         // with this VPA auto-tag without needing the Places lookup.
+        // Crucially: store merchantName so the next debit on this VPA
+        // shows the Places-resolved storefront immediately, not the
+        // bank's raw payee text.
         try {
           const { recordVpaConfirmation } = await import('../../db/vpaPatterns.js');
           await recordVpaConfirmation({
             vpa: tx.vpa,
             categoryId: cat.id,
             excludeTransactionId: id,
+            merchantName: parsed.data.placesName,
           });
         } catch (err) {
           req.log.warn({ err }, '[apply-place] vpa pattern record failed');
