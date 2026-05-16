@@ -39,11 +39,12 @@ struct CategoryPickerSheet: View {
         return !ContactsService.isMerchantVpaPublic(vpa)
     }
 
-    /// Content-sized detent. header (~52) + divider + 7 category rows
-    /// (~48 each) + optional pin row (~48 + divider ~12) + bottom
-    /// cushion. Grows only when the pin row is actually shown.
+    /// Content-sized detent. header (~72 with the action one-liner) +
+    /// divider + 7 category rows (~48 each) + optional pin row (~48 +
+    /// divider ~12) + bottom cushion. Grows only when the pin row is
+    /// actually shown.
     private var sheetHeight: CGFloat {
-        let base: CGFloat = 472
+        let base: CGFloat = 490
         return canPinContact ? base + 64 : base
     }
 
@@ -94,7 +95,7 @@ struct CategoryPickerSheet: View {
     @ViewBuilder
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("edit details")
+            Text("edit tag")
                 .font(.system(size: 11, weight: .semibold).smallCaps())
                 .foregroundStyle(AppColor.textTertiary)
             Text(transaction.displayMerchant)
@@ -102,6 +103,13 @@ struct CategoryPickerSheet: View {
                 .foregroundStyle(AppColor.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
+            // One-liner hint of what's available in the sheet. Drops
+            // the contact half when the row isn't pin-eligible (merchant
+            // VPAs / credit card rows) so we don't promise affordances
+            // that won't appear below.
+            Text(canPinContact ? "add contact · pick category" : "pick category")
+                .font(AppFont.caption)
+                .foregroundStyle(AppColor.textTertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
