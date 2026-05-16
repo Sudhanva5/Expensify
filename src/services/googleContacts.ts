@@ -169,21 +169,61 @@ export async function lookupByVpa(opts: {
         where: { phoneDigits: { has: phoneKey } },
         select: { resourceName: true, displayName: true, photoUrl: true },
       });
-      if (hit) {
-        return { ...hit, matchedOn: 'phone' };
-      }
+      if (hit) return { ...hit, matchedOn: 'phone' };
     }
   }
 
-  // Name fallback: pull every contact with a photo, score against the
-  // merchant raw + VPA local part. Single-user with hundreds of contacts
-  // — fine to keep in-memory.
+  // Name fallback. We pull every contact with a photo and try two
+  // matching strategies in order:
+  //
+  //   1. COMPACT-FORM MATCH — strip non-letters from both sides and
+  //      check substring containment. This is what catches the VPA
+  //      `sagarprabhu251-1@okhdfcbank` against contact "Sagar Prabhu":
+  //      compact local "sagarprabhu" == compact name "sagarprabhu".
+  //      Token-overlap scoring (the previous-only strategy) misses
+  //      this because "sagar prabhu" with its space doesn't .includes
+  //      the runtogether "sagarprabhu".
+  //
+  //   2. TOKEN-OVERLAP — for VPAs where the local-part legitimately
+  //      contains separators (`sneha.r@oksbi`), score by how many
+  //      tokens overlap. Requires ≥2 hits to avoid matching every
+  //      "Kumar" in the address book.
   const haystack = await prisma.googleContact.findMany({
     where: { photoUrl: { not: null } },
     select: { resourceName: true, displayName: true, photoUrl: true, givenName: true, familyName: true },
   });
   if (haystack.length === 0) return null;
 
+  const queryCompact = compactizeLocal(opts.vpa, opts.merchantRaw);
+
+  // Strategy 1: compact-form substring match. Uniqueness guarded — a
+  // single common compact like "kumar" could match dozens of contacts;
+  // in that case fall through to token-overlap which has explicit
+  // scoring. Only return on exact-one compact-form hit.
+  if (queryCompact && queryCompact.length >= 6) {
+    const compactHits: typeof haystack = [];
+    for (const c of haystack) {
+      const candidateCompact = compactizeName(c);
+      if (!candidateCompact || candidateCompact.length < 4) continue;
+      if (
+        candidateCompact.includes(queryCompact) ||
+        queryCompact.includes(candidateCompact)
+      ) {
+        compactHits.push(c);
+      }
+    }
+    if (compactHits.length === 1) {
+      const c = compactHits[0]!;
+      return {
+        resourceName: c.resourceName,
+        displayName: c.displayName,
+        photoUrl: c.photoUrl,
+        matchedOn: 'name',
+      };
+    }
+  }
+
+  // Strategy 2: token-overlap fallback for separator-bearing locals.
   const tokens = tokensFor(opts.vpa, opts.merchantRaw);
   if (tokens.size === 0) return null;
 
@@ -209,10 +249,31 @@ export async function lookupByVpa(opts: {
       };
     }
   }
-  // Require ≥2 token hits OR a single-token exact-name match to avoid
-  // accidentally matching every contact with "Kumar" in their name.
   if (bestScore < 2) return null;
   return best;
+}
+
+/** Strip everything that isn't a letter, lowercase. "Sagar Prabhu" → "sagarprabhu". */
+function compactizeName(c: {
+  displayName: string | null;
+  givenName: string | null;
+  familyName: string | null;
+}): string {
+  const joined = [c.displayName, c.givenName, c.familyName]
+    .filter((s): s is string => !!s)
+    .join('');
+  return joined.toLowerCase().replace(/[^a-z]+/g, '');
+}
+
+/** Same idea for the query side — drop @handle and any digits/punct. */
+function compactizeLocal(vpa: string | null, merchantRaw: string | null | undefined): string {
+  const parts: string[] = [];
+  if (vpa) {
+    const local = vpa.split('@')[0] ?? '';
+    parts.push(local);
+  }
+  if (merchantRaw) parts.push(merchantRaw);
+  return parts.join('').toLowerCase().replace(/[^a-z]+/g, '');
 }
 
 function tokensFor(vpa: string | null, merchantRaw: string | null | undefined): Set<string> {

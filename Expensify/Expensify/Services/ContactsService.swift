@@ -312,7 +312,35 @@ final class ContactsService {
             return phoneCandidates[0]
         }
 
-        // --- Pass 2: token-score name match ------------------------------
+        // --- Pass 2a: compact-form substring match ----------------------
+        // Catches the case where the VPA's local-part runs words
+        // together: `sagarprabhu251-1@okhdfcbank` against contact
+        // "Sagar Prabhu". Token overlap (Pass 2b) misses this because
+        // the contact has a space inside its display name. Strip every
+        // non-letter from both sides and check substring containment.
+        //
+        // Uniqueness guarded: accept only when exactly ONE contact
+        // matches. A common compact like "kumar" would otherwise pull
+        // in any "Ajay Kumar" / "Suresh Kumar" — better to fall through
+        // to token-overlap which handles the multi-Kumar case.
+        let queryCompact = Self.compactize(transaction.merchantRaw) +
+            Self.compactize(transaction.vpa.flatMap { vpa -> String? in
+                let at = vpa.firstIndex(of: "@") ?? vpa.endIndex
+                return String(vpa[..<at])
+            } ?? "")
+        if queryCompact.count >= 6 {
+            var compactHits: [Contact] = []
+            for c in allContacts {
+                let cc = Self.compactize(c.displayName)
+                if cc.count < 4 { continue }
+                if cc.contains(queryCompact) || queryCompact.contains(cc) {
+                    compactHits.append(c)
+                }
+            }
+            if compactHits.count == 1 { return compactHits[0] }
+        }
+
+        // --- Pass 2b: token-score name match ------------------------------
         // Union of tokens from the bank payee AND the VPA local-part.
         // VPA local often carries the FULL name even when the bank
         // truncated to "SNEHA R" — e.g. `s.neha2003rajesh@okhdfcbank`
@@ -355,6 +383,17 @@ final class ContactsService {
         }
 
         return nil
+    }
+
+    /// Lowercase + strip every non-letter. "Sagar Prabhu" → "sagarprabhu".
+    /// Used by Pass 2a to compare run-together VPA locals against contact
+    /// display names that contain a space.
+    private static func compactize(_ s: String) -> String {
+        s.unicodeScalars
+            .filter { CharacterSet.letters.contains($0) }
+            .map(String.init)
+            .joined()
+            .lowercased()
     }
 
     /// Normalize a name-ish string into its meaningful tokens. Strips
