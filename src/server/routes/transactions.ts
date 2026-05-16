@@ -70,27 +70,56 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
       const rows = await prisma.transaction.findMany({
         orderBy: { occurredAt: 'desc' },
         take: limit,
-        include: { category: { select: { name: true } } },
+        include: {
+          category: { select: { name: true } },
+          // Most-recently-arrived receipt for each transaction. Usually
+          // one; if Swiggy + delivery-confirmation both attached, the
+          // later one wins (it tends to have full details vs. the
+          // "order placed" status email).
+          receipts: {
+            orderBy: { receivedAt: 'desc' },
+            take: 1,
+          },
+        },
       });
 
-      return rows.map((r) => ({
-        id: r.id,
-        amount_inr_minor: r.amountInrMinor !== null ? Number(r.amountInrMinor) : Number(r.amountMinor),
-        currency: r.currency,
-        merchant_raw: r.merchantRaw,
-        merchant_normalized: r.merchantNormalized,
-        vpa: r.vpa,
-        direction: r.direction,
-        instrument: r.instrument,
-        occurred_at: r.occurredAt.toISOString(),
-        category: r.category?.name ?? null,
-        confidence: r.confidence !== null ? Number(r.confidence) : null,
-        signal_source: r.signalSource,
-        status: r.status,
-        location_lat: r.locationLat !== null ? Number(r.locationLat) : null,
-        location_lng: r.locationLng !== null ? Number(r.locationLng) : null,
-        location_status: r.locationStatus,
-      }));
+      return rows.map((r) => {
+        const receipt = r.receipts[0];
+        return {
+          id: r.id,
+          amount_inr_minor: r.amountInrMinor !== null ? Number(r.amountInrMinor) : Number(r.amountMinor),
+          currency: r.currency,
+          merchant_raw: r.merchantRaw,
+          merchant_normalized: r.merchantNormalized,
+          vpa: r.vpa,
+          direction: r.direction,
+          instrument: r.instrument,
+          occurred_at: r.occurredAt.toISOString(),
+          category: r.category?.name ?? null,
+          confidence: r.confidence !== null ? Number(r.confidence) : null,
+          signal_source: r.signalSource,
+          status: r.status,
+          location_lat: r.locationLat !== null ? Number(r.locationLat) : null,
+          location_lng: r.locationLng !== null ? Number(r.locationLng) : null,
+          location_status: r.locationStatus,
+          receipt: receipt
+            ? {
+                id: receipt.id,
+                gmail_message_id: receipt.gmailMessageId,
+                source: receipt.source,
+                subject: receipt.subject,
+                snippet: receipt.snippet,
+                received_at: receipt.receivedAt.toISOString(),
+                from_address: receipt.fromAddress,
+                amount_inr_minor: receipt.amountInrMinor !== null ? Number(receipt.amountInrMinor) : null,
+                order_id: receipt.orderId,
+                items: receipt.itemsJson ?? null,
+                fees: receipt.feesJson ?? null,
+                meta: receipt.metaJson ?? null,
+              }
+            : null,
+        };
+      });
     },
   );
 

@@ -14,6 +14,8 @@ import {
 } from '../../gmail/history.js';
 import { authorizedClient } from '../../gmail/oauth.js';
 import { processGmailMessage } from '../../pipeline/processGmailMessage.js';
+import { processReceiptEmail } from '../../pipeline/processReceiptEmail.js';
+import { isReceiptSender } from '../../receipts/extractors.js';
 import { buildCategorizeContextFromDb } from '../../db/categorizeContext.js';
 import { requestLocationFromAllDevices } from '../../services/apns.js';
 
@@ -83,6 +85,16 @@ export async function gmailWebhookRoute(app: FastifyInstance): Promise<void> {
     const ctx = await buildCategorizeContextFromDb();
 
     for (const msg of messages) {
+      // Route by sender. Receipt emails (Swiggy, Amazon, Zomato, ...)
+      // bypass the HDFC parser entirely and go through processReceiptEmail
+      // which does plain-text extraction + transaction binding. Anything
+      // else falls into the HDFC pipeline.
+      if (isReceiptSender(msg.fromAddress)) {
+        const receiptOutcome = await processReceiptEmail(msg);
+        app.log.info({ outcome: receiptOutcome }, 'receipt processed');
+        continue;
+      }
+
       const outcome = await processGmailMessage(msg, ctx);
       app.log.info({ outcome }, 'gmail message processed');
 

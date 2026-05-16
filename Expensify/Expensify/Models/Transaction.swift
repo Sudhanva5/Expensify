@@ -20,6 +20,12 @@ struct Transaction: Identifiable, Hashable {
     let locationLng: Double?
     let locationCity: String?
     let locationStatus: LocationStatus
+    /// Optional Gmail-sourced receipt linked to this transaction.
+    /// Populated when an order email from Swiggy / Amazon / etc. landed
+    /// in the user's inbox AND the backend matched it by amount +
+    /// timestamp. Used by the bottom-sheet "more details" to render the
+    /// receipt card (items + Gmail deep link).
+    var receipt: ReceiptDetails? = nil
 
     enum LocationStatus: String, Codable, Hashable {
         case awaiting

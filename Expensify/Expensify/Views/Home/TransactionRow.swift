@@ -144,10 +144,12 @@ struct TransactionRow: View {
     }
 
     /// Show the "more details" chip when the sheet would actually have
-    /// something useful in it — either a resolved business name (probable
-    /// nearby place) or coordinates for the map preview.
+    /// something useful — Places resolution, GPS coordinates for a map,
+    /// OR a Gmail-sourced receipt with items / order ID.
     private var shouldShowInfo: Bool {
-        transaction.hasResolvedMerchant || transaction.hasCoordinates
+        transaction.hasResolvedMerchant ||
+        transaction.hasCoordinates ||
+        transaction.receipt != nil
     }
 
     private var categoryText: String {

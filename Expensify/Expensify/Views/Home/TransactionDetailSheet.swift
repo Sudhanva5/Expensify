@@ -41,28 +41,40 @@ struct TransactionDetailSheet: View {
         return transaction.displayMerchant
     }
 
-    /// Content-sized height per Apple HIG ("Sheets") — the sheet should be
-    /// just big enough for its contents, no taller. We dropped the VPA
-    /// subtitle row (~16pts), so the totals come back down a notch.
+    /// Content-sized height per Apple HIG ("Sheets") — adapts to which
+    /// sections are present. Receipt adds ~140pts (snippet card) to
+    /// ~240pts (full items card); map adds 240pts. Numbers tuned to leave
+    /// minimal trailing whitespace on iPhone 14/15-class screens.
     private var sheetHeight: CGFloat {
-        hasMap ? 380 : 140
+        let receipt = transaction.receipt
+        let receiptHeight: CGFloat = receipt?.hasStructuredItems == true
+            ? 240
+            : (receipt != nil ? 140 : 0)
+        let base: CGFloat = hasMap ? 380 : 140
+        // Use a fraction-style cap so very tall sheets still fit the
+        // screen — the system will switch to a scrollable detent.
+        return min(base + receiptHeight, 700)
     }
 
     var body: some View {
         ZStack {
             AppColor.canvas.ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 16) {
-                header
-                if hasMap { mapPreview }
-                if hasMap { mapsButton }
-                Spacer(minLength: 0)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    header
+                    if hasMap { mapPreview }
+                    if hasMap { mapsButton }
+                    if let receipt = transaction.receipt {
+                        ReceiptCard(receipt: receipt)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 24)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
-            .padding(.bottom, 24)
         }
-        .presentationDetents([.height(sheetHeight)])
+        .presentationDetents([.height(sheetHeight), .large])
         .presentationDragIndicator(.visible)
         .presentationBackground(AppColor.canvas)
     }

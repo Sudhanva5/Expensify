@@ -54,7 +54,8 @@ model Transaction {
   status        TxStatus  @default(awaiting_location)
   autoFinalized Boolean   @default(false)
 
-  tags TransactionTag[]
+  tags     TransactionTag[]
+  receipts EmailReceipt[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -240,4 +241,60 @@ model EmailMessage {
   rawHeaders     Json?
   parseError     String?
   receivedAt     DateTime  @default(now())
+}
+
+// ============================================================
+// Receipts (Swiggy / Amazon / Uber / etc.)
+// ============================================================
+//
+// Receipt emails from major online merchants give us much richer context
+// than the bank's HDFC alert ("₹308 debited" vs. "Belgian Waffle Co. —
+// 1× Triple Chocomelt Waffle ₹185 + Restaurant Packaging ₹10 + ..."). We
+// capture them in a parallel pipeline and bind them to HDFC transactions
+// by amount + timestamp.
+//
+// `transactionId` is nullable — receipts may arrive before the HDFC alert
+// or fail to match (orphan). The iOS app surfaces them via the bottom-
+// sheet "more details" card.
+//
+// `itemsJson` / `feesJson` / `metaJson` are loose to accommodate per-
+// merchant parser output without rigid schema migrations every time we
+// add a new merchant. Each parser version stamps `parserVersion` so we
+// can re-run extraction if formats change.
+
+model EmailReceipt {
+  id             String   @id @default(cuid())
+  gmailMessageId String   @unique
+  source         String   // 'swiggy', 'amazon', 'zomato', 'bookmyshow', 'uber', 'generic'
+  subject        String
+  snippet        String   // Gmail's first ~200 chars preview
+  receivedAt     DateTime
+  fromAddress    String?
+
+  // Lightweight extracts that work across every merchant via universal regex.
+  amountInrMinor BigInt?
+  orderId        String?
+
+  // Optional rich extraction (per-merchant parsers). Null when only
+  // the universal regex fired or the merchant parser failed.
+  itemsJson      Json?    // [{ name, qty, price (rupees) }]
+  feesJson       Json?    // [{ name, amount (rupees) }]
+  metaJson       Json?    // { fromAddress, toAddress, restaurant, etas, etc. }
+
+  parserVersion  String   // 'swiggy.v1', 'generic.v1', etc.
+  parseError     String?
+
+  // Optional bind to an HDFC transaction (amount + timestamp match).
+  // Nullable because:
+  //   - receipt may arrive before the HDFC alert (race)
+  //   - amount + timestamp may not match anything (orphan)
+  //   - user may have multiple cards and we couldn't disambiguate
+  transaction   Transaction? @relation(fields: [transactionId], references: [id])
+  transactionId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([transactionId])
+  @@index([receivedAt])
+  @@index([source, receivedAt])
 }

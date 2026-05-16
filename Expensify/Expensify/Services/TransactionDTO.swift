@@ -20,6 +20,9 @@ struct TransactionDTO: Codable {
     let locationLat: Double?
     let locationLng: Double?
     let locationStatus: String
+    /// Optional receipt info (from /receipts pipeline). Backend returns
+    /// `null` when no receipt has been bound to this transaction yet.
+    let receipt: ReceiptDTO?
 
     func toModel() -> Transaction? {
         let dir: Transaction.Direction
@@ -83,7 +86,79 @@ struct TransactionDTO: Codable {
             locationLat: locationLat,
             locationLng: locationLng,
             locationCity: nil,
-            locationStatus: locStatus
+            locationStatus: locStatus,
+            receipt: receipt?.toModel()
+        )
+    }
+}
+
+/// Wire shape of the receipt embedded in `GET /transactions` response.
+struct ReceiptDTO: Codable {
+    let id: String
+    let gmailMessageId: String
+    let source: String
+    let subject: String
+    let snippet: String
+    let receivedAt: String           // ISO 8601
+    let fromAddress: String?
+    let amountInrMinor: Int64?
+    let orderId: String?
+    let items: [ItemDTO]?
+    let fees: [FeeDTO]?
+    let meta: MetaDTO?
+
+    struct ItemDTO: Codable {
+        let name: String
+        let qty: Int
+        let priceInr: Decimal
+    }
+    struct FeeDTO: Codable {
+        let name: String
+        let amountInr: Decimal
+    }
+    struct MetaDTO: Codable {
+        let journeyFrom: EntryDTO?
+        let journeyTo: EntryDTO?
+
+        struct EntryDTO: Codable {
+            let text: String
+            let timestamp: String
+        }
+    }
+
+    func toModel() -> ReceiptDetails {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let received = formatter.date(from: receivedAt)
+            ?? ISO8601DateFormatter().date(from: receivedAt)
+            ?? Date()
+
+        return ReceiptDetails(
+            id: id,
+            gmailMessageId: gmailMessageId,
+            source: source,
+            subject: subject,
+            snippet: snippet,
+            receivedAt: received,
+            fromAddress: fromAddress,
+            amountInr: amountInrMinor.map { Decimal($0) / 100 },
+            orderId: orderId,
+            items: items?.map {
+                ReceiptItem(name: $0.name, qty: $0.qty, priceInr: $0.priceInr)
+            },
+            fees: fees?.map {
+                ReceiptFee(name: $0.name, amountInr: $0.amountInr)
+            },
+            meta: meta.map {
+                ReceiptMeta(
+                    journeyFrom: $0.journeyFrom.map {
+                        JourneyEntry(text: $0.text, timestamp: $0.timestamp)
+                    },
+                    journeyTo: $0.journeyTo.map {
+                        JourneyEntry(text: $0.text, timestamp: $0.timestamp)
+                    }
+                )
+            }
         )
     }
 }
