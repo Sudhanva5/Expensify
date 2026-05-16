@@ -1,15 +1,19 @@
 import SwiftUI
 import Contacts
 
-/// Compact bottom sheet shown when the user swipes a row → "edit tag".
+/// Compact bottom sheet shown when the user swipes a row → "edit details".
 /// Lists the seven V1 categories as tappable rows; selecting one fires
 /// `TransactionStore.retag(...)` which optimistically updates the row
 /// and PATCHes the backend in the background.
 ///
+/// For UPI-from-account rows with a non-merchant VPA, a "pin to contact"
+/// row sits at the bottom of the list (same visual style as the category
+/// rows) so the user can manually link a VPA to a specific iPhone
+/// contact when the algorithmic matcher can't.
+///
 /// Sheet height is set explicitly so it matches content — see Apple HIG
 /// "Sheets": presentations should be sized for their content, not the
-/// full half-screen .medium detent. Anything taller than this would leave
-/// awkward whitespace below the seven category rows.
+/// full half-screen .medium detent.
 struct CategoryPickerSheet: View {
     let transaction: Transaction
 
@@ -17,21 +21,17 @@ struct CategoryPickerSheet: View {
     @Environment(TransactionStore.self) private var store
     @Environment(ContactsService.self) private var contactsService
 
-    /// Drives the "Save as rule" follow-up sheet. Set when the user picks
-    /// a category; the wizard inherits that category as the rule's action.
-    @State private var createRuleFor: Category?
     /// Drives the iPhone-Contacts picker sheet for pinning a VPA to a
     /// specific person. Only meaningful when the transaction has a VPA
     /// that isn't a merchant Q-code.
     @State private var showingContactPicker: Bool = false
-    /// Snapshot of the pinned contact name (so the sheet's "current pin"
-    /// row reflects edits without bouncing off the parent view).
+    /// Snapshot of the pinned contact name, refreshed on appear and on
+    /// every successful pick so the sheet shows the current state.
     @State private var pinnedName: String?
 
-    /// True when this row is eligible for a contact pin. We allow pins
-    /// on any UPI debit from a bank account whose VPA isn't a clear
-    /// merchant Q-code. Credit-card transactions and merchant-VPA rows
-    /// are people-agnostic and skip the affordance.
+    /// True when this row is eligible for a contact pin. UPI debit from
+    /// a bank account whose VPA isn't a merchant Q-code (those are shops,
+    /// not people, so no contact-overlay makes sense).
     private var canPinContact: Bool {
         guard transaction.direction == .out else { return false }
         guard transaction.instrument.hasPrefix("account_") else { return false }
@@ -39,11 +39,12 @@ struct CategoryPickerSheet: View {
         return !ContactsService.isMerchantVpaPublic(vpa)
     }
 
-    /// Content-sized detent. Footer grows when the contact-pin option is
-    /// visible so layout never crops.
+    /// Content-sized detent. header (~52) + divider + 7 category rows
+    /// (~48 each) + optional pin row (~48 + divider ~12) + bottom
+    /// cushion. Grows only when the pin row is actually shown.
     private var sheetHeight: CGFloat {
-        let base: CGFloat = 520
-        return canPinContact ? base + 56 : base
+        let base: CGFloat = 472
+        return canPinContact ? base + 64 : base
     }
 
     var body: some View {
@@ -54,10 +55,9 @@ struct CategoryPickerSheet: View {
                 header
                 Divider().opacity(0.4)
                 categoryList
-                Divider().opacity(0.4)
-                createRuleFooter
                 if canPinContact {
-                    pinContactFooter
+                    Divider().opacity(0.4)
+                    contactPinRow
                 }
                 Spacer(minLength: 0)
             }
@@ -66,9 +66,6 @@ struct CategoryPickerSheet: View {
         .presentationDetents([.height(sheetHeight)])
         .presentationDragIndicator(.visible)
         .presentationBackground(AppColor.canvas)
-        .sheet(item: $createRuleFor) { cat in
-            CreateRuleSheet(transaction: transaction, category: cat)
-        }
         .sheet(isPresented: $showingContactPicker) {
             ContactPickerSheet(
                 onPick: { cn in
@@ -77,7 +74,8 @@ struct CategoryPickerSheet: View {
                         // Refresh the local CN cache so the new pin
                         // surfaces immediately without a relaunch.
                         Task { await contactsService.requestAccessAndLoad() }
-                        let display = "\(cn.givenName) \(cn.familyName)".trimmingCharacters(in: .whitespaces)
+                        let display = "\(cn.givenName) \(cn.familyName)"
+                            .trimmingCharacters(in: .whitespaces)
                         pinnedName = display.isEmpty ? nil : display
                     }
                     showingContactPicker = false
@@ -93,84 +91,10 @@ struct CategoryPickerSheet: View {
         }
     }
 
-    /// Anchored at the bottom of the picker. Opens the "create rule from
-    /// this transaction" wizard pre-filled with the row's current
-    /// category. Available regardless of whether the user changed the
-    /// category — sometimes the displayed category is already right but
-    /// the user wants to teach the system to recognize this *kind* of
-    /// transaction automatically next time.
-    /// Bottom-most footer when the row could plausibly be a P2P. Lets the
-    /// user override the algorithm with a manual `VPA → iPhone-contact`
-    /// pin. Shows the currently-pinned name (with an unpin affordance) or
-    /// the "tap to pin" prompt depending on state.
-    @ViewBuilder
-    private var pinContactFooter: some View {
-        Button {
-            showingContactPicker = true
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: pinnedName == nil ? "person.crop.circle.badge.plus" : "person.crop.circle.fill.badge.checkmark")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(pinnedName == nil ? AppColor.tap : AppColor.inflow)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(pinnedName == nil ? "pin to contact" : "pinned: \(pinnedName ?? "")")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(AppColor.textPrimary)
-                    if pinnedName != nil {
-                        Text("tap to change · long-press to unpin")
-                            .font(AppFont.caption)
-                            .foregroundStyle(AppColor.textTertiary)
-                    }
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(AppColor.textTertiary)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        // Unpin gesture — only meaningful when a pin already exists.
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                guard let vpa = transaction.vpa, pinnedName != nil else { return }
-                contactsService.unpin(vpa: vpa)
-                pinnedName = nil
-            }
-        )
-    }
-
-    @ViewBuilder
-    private var createRuleFooter: some View {
-        Button {
-            let cat = transaction.category ?? .personalTransfer
-            createRuleFor = cat
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "wand.and.stars")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(AppColor.tap)
-                Text("create rule from this transaction")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(AppColor.textPrimary)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(AppColor.textTertiary)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
     @ViewBuilder
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("change category")
+            Text("edit details")
                 .font(.system(size: 11, weight: .semibold).smallCaps())
                 .foregroundStyle(AppColor.textTertiary)
             Text(transaction.displayMerchant)
@@ -188,38 +112,102 @@ struct CategoryPickerSheet: View {
         VStack(spacing: 2) {
             ForEach(Category.allCases) { cat in
                 Button(action: { pick(cat) }) {
-                    HStack(spacing: 12) {
-                        Image(systemName: cat.symbolName)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(AppColor.textPrimary)
-                            .frame(width: 28, height: 28)
-                            .background(AppColor.avatarFill)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                        Text(cat.shortName)
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(AppColor.textPrimary)
-
-                        Spacer()
-
-                        if transaction.category == cat {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(AppColor.tap)
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .contentShape(Rectangle())
+                    rowLayout(
+                        icon: cat.symbolName,
+                        title: cat.shortName,
+                        subtitle: nil,
+                        accessory: transaction.category == cat ? .checkmark : .none
+                    )
                 }
                 .buttonStyle(.plain)
             }
         }
     }
 
+    /// Same visual language as the category rows above: 28pt rounded-
+    /// square icon, 15pt medium title, optional secondary caption when
+    /// already pinned. Reads as part of the same "edit details" list
+    /// instead of a tacked-on footer.
+    @ViewBuilder
+    private var contactPinRow: some View {
+        Button {
+            showingContactPicker = true
+        } label: {
+            rowLayout(
+                icon: pinnedName == nil
+                    ? "person.crop.circle.badge.plus"
+                    : "person.crop.circle.fill.badge.checkmark",
+                title: pinnedName ?? "pin to contact",
+                subtitle: pinnedName != nil ? "long-press to unpin" : nil,
+                accessory: .chevron
+            )
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                guard let vpa = transaction.vpa, pinnedName != nil else { return }
+                contactsService.unpin(vpa: vpa)
+                pinnedName = nil
+            }
+        )
+    }
+
+    /// Shared row scaffold — keeps every line in the sheet on the same
+    /// grid so the category list and the pin row don't visually drift.
+    private enum RowAccessory { case none, checkmark, chevron }
+
+    @ViewBuilder
+    private func rowLayout(
+        icon: String,
+        title: String,
+        subtitle: String?,
+        accessory: RowAccessory
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(AppColor.textPrimary)
+                .frame(width: 28, height: 28)
+                .background(AppColor.avatarFill)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(AppColor.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(AppFont.caption)
+                        .foregroundStyle(AppColor.textTertiary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            switch accessory {
+            case .none:
+                EmptyView()
+            case .checkmark:
+                Image(systemName: "checkmark")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppColor.tap)
+            case .chevron:
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AppColor.textTertiary)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+
     /// Pick a category — fire the optimistic retag, dismiss immediately.
-    /// The store handles the network round-trip + error recovery; the user
-    /// shouldn't have to wait staring at the sheet while we POST.
+    /// The store handles the network round-trip + error recovery; the
+    /// user shouldn't wait staring at the sheet while we POST.
     private func pick(_ category: Category) {
         let txId = transaction.id
         Task { await store.retag(transactionId: txId, to: category) }
@@ -239,5 +227,6 @@ struct CategoryPickerSheet: View {
     return Color.gray.sheet(isPresented: .constant(true)) {
         CategoryPickerSheet(transaction: mock)
             .environment(TransactionStore())
+            .environment(ContactsService())
     }
 }

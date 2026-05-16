@@ -2,16 +2,14 @@ import SwiftUI
 import CoreLocation
 
 /// Manual rule-creation form. Opened from the "+" toolbar button in
-/// ManageRulesView. Unlike CreateRuleSheet (which pre-fills from a
-/// concrete transaction), this starts blank — the user describes a
-/// pattern from memory ("everything I pay near my mom's place is
-/// personal-transfer", "weekends 8-11pm Food is Entertainment").
+/// ManageRulesView. Starts blank — the user describes a pattern from
+/// memory ("everything I pay near my mom's place is personal-transfer",
+/// "weekends 8-11pm Food is Entertainment").
 ///
-/// Keeps the surface area small: name, category, optional amount
-/// window, optional time window, optional location radius. Anything
-/// beyond that (day-of-week, payee regex, VPA shape) lives in the
-/// "create rule from this transaction" wizard where the system can
-/// fill realistic defaults.
+/// Keeps the surface area small: name, category, optional amount window,
+/// optional time window, optional location radius. Day-of-week, payee
+/// regex, and VPA-shape conditions live in the JSONB column and can be
+/// added by editing the rule directly in the DB if the user needs them.
 struct RuleEditorSheet: View {
     /// Fires after a successful save so the parent list can refresh.
     var onSaved: () -> Void
