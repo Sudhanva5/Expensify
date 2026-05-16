@@ -24,6 +24,17 @@ const patchBody = z.object({
   status: z.enum(['pending_review', 'resolved']).optional(),
 });
 
+const applyPlaceBody = z.object({
+  // The Places display name to claim — e.g. "Sri Vishnu Grand Veg".
+  // Becomes merchantNormalized on this row AND every same-VPA row.
+  placesName: z.string().min(1).max(200),
+  category: z.string().min(1).max(120),
+  // Optional storefront centroid; we snap location to it so "open in
+  // Maps" lands on the actual shop rather than the user's GPS jitter.
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
+});
+
 interface IdParams {
   Params: { id: string };
   Body: unknown;
@@ -216,6 +227,104 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
       }
 
       return { ok: true };
+    },
+  );
+
+  // Claim a Nearby Places suggestion. Sets the storefront name and
+  // category on the current row, then bulk-propagates BOTH fields to
+  // every other transaction with the same VPA. The bulk update is the
+  // "if I claim this VPA belongs to Sri Vishnu Grand Veg, fix all my
+  // history" user ask — much stronger than just category propagation.
+  app.post<IdParams>(
+    '/:id/apply-place',
+    { preHandler: requireApiToken },
+    async (req, reply) => {
+      const { id } = req.params;
+      const parsed = applyPlaceBody.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'Invalid body', details: parsed.error.format() });
+      }
+
+      const tx = await prisma.transaction.findUnique({
+        where: { id },
+        select: { id: true, vpa: true, locationLat: true, locationLng: true },
+      });
+      if (!tx) return reply.code(404).send({ error: 'Transaction not found' });
+
+      const cat = await prisma.category.findUnique({ where: { name: parsed.data.category } });
+      if (!cat) return reply.code(400).send({ error: `Unknown category: ${parsed.data.category}` });
+
+      const snapLat = parsed.data.lat ?? null;
+      const snapLng = parsed.data.lng ?? null;
+
+      // Update the claimed row first.
+      await prisma.transaction.update({
+        where: { id },
+        data: {
+          merchantNormalized: parsed.data.placesName,
+          categoryId: cat.id,
+          status: 'resolved',
+          confidence: 0.99,
+          signalSource: 'places',
+          ...(snapLat !== null ? { locationLat: snapLat } : {}),
+          ...(snapLng !== null ? { locationLng: snapLng } : {}),
+          updatedAt: new Date(),
+        },
+      });
+
+      // Bulk-propagate to every same-VPA row. Skip rows that already
+      // match name + category (no-op).
+      let bulkUpdated = 0;
+      if (tx.vpa) {
+        const result = await prisma.transaction.updateMany({
+          where: {
+            vpa: tx.vpa,
+            id: { not: id },
+            OR: [
+              { merchantNormalized: { not: parsed.data.placesName } },
+              { categoryId: { not: cat.id } },
+            ],
+          },
+          data: {
+            merchantNormalized: parsed.data.placesName,
+            categoryId: cat.id,
+            signalSource: 'merchant_pattern',
+            confidence: 0.99,
+            status: 'resolved',
+            updatedAt: new Date(),
+          },
+        });
+        bulkUpdated = result.count;
+
+        // Also record VPA + merchant patterns so future transactions
+        // with this VPA auto-tag without needing the Places lookup.
+        try {
+          const { recordVpaConfirmation } = await import('../../db/vpaPatterns.js');
+          await recordVpaConfirmation({
+            vpa: tx.vpa,
+            categoryId: cat.id,
+            excludeTransactionId: id,
+          });
+        } catch (err) {
+          req.log.warn({ err }, '[apply-place] vpa pattern record failed');
+        }
+      }
+
+      try {
+        const { recordConfirmation } = await import('../../db/merchantPatterns.js');
+        await recordConfirmation({
+          merchantNormalized: parsed.data.placesName,
+          categoryId: cat.id,
+        });
+      } catch (err) {
+        req.log.warn({ err }, '[apply-place] merchant pattern record failed');
+      }
+
+      req.log.info(
+        { txId: id, vpa: tx.vpa, placesName: parsed.data.placesName, bulkUpdated },
+        '[apply-place] claimed Places suggestion',
+      );
+      return { ok: true, bulk_updated: bulkUpdated };
     },
   );
 

@@ -87,6 +87,43 @@ actor APIClient {
         return dtos.compactMap { $0.toModel() }
     }
 
+    /// Claim a Nearby Places suggestion. Backend rewrites this row's
+    /// merchantNormalized + category to match, then bulk-propagates BOTH
+    /// fields to every same-VPA row in the user's history. The same
+    /// effective fix as if the recategorize step had auto-resolved every
+    /// row to the Places centroid in the first place.
+    func applyPlace(
+        transactionId: String,
+        placesName: String,
+        category: Category,
+        latitude: Double?,
+        longitude: Double?
+    ) async throws -> Int {
+        struct Body: Encodable {
+            let placesName: String
+            let category: String
+            let lat: Double?
+            let lng: Double?
+        }
+        let body = Body(
+            placesName: placesName,
+            category: category.rawValue,
+            lat: latitude,
+            lng: longitude
+        )
+        var req = URLRequest(url: Constants.baseURL.appendingPathComponent("/transactions/\(transactionId)/apply-place"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
+        // Keep camelCase on the wire — the Zod schema uses placesName.
+        req.httpBody = try plainEncoder.encode(body)
+        let (data, http) = try await HTTPClient.shared.send(req)
+        try ensure2xx(http: http, data: data)
+        struct Wire: Decodable { let ok: Bool; let bulkUpdated: Int }
+        let w = try decoder.decode(Wire.self, from: data)
+        return w.bulkUpdated
+    }
+
     /// Mark a transaction as resolved. Optionally override the category at
     /// the same time (used by the post-swipe tagging list).
     func confirmTransaction(id: String, overrideCategory: Category? = nil) async throws {

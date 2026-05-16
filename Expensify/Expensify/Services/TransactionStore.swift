@@ -146,6 +146,63 @@ final class TransactionStore {
         }
     }
 
+    /// Claim a Nearby Places suggestion. Updates this row's merchant +
+    /// category locally for instant feedback, then POSTs the apply-place
+    /// endpoint which bulk-propagates the merchant + category to every
+    /// other transaction with the same VPA. On success, refresh from the
+    /// server so the bulk-updated rows reflect their new state in the UI.
+    func applyPlace(
+        transactionId: String,
+        placesName: String,
+        category: Category,
+        lat: Double?,
+        lng: Double?
+    ) async {
+        guard let idx = transactions.firstIndex(where: { $0.id == transactionId }) else { return }
+        let original = transactions[idx]
+        // Optimistic patch — replace merchantNormalized + category on the
+        // claimed row immediately. Same-VPA rows will catch up on refresh.
+        transactions[idx] = Transaction(
+            id: original.id,
+            amountInr: original.amountInr,
+            currency: original.currency,
+            merchantRaw: original.merchantRaw,
+            merchantNormalized: placesName,
+            vpa: original.vpa,
+            direction: original.direction,
+            instrument: original.instrument,
+            occurredAt: original.occurredAt,
+            category: category,
+            confidence: 0.99,
+            signalSource: .places,
+            status: .resolved,
+            locationLat: lat ?? original.locationLat,
+            locationLng: lng ?? original.locationLng,
+            locationCity: original.locationCity,
+            locationStatus: original.locationStatus,
+            receipt: original.receipt,
+            placesSuggestions: original.placesSuggestions
+        )
+
+        do {
+            _ = try await APIClient.shared.applyPlace(
+                transactionId: transactionId,
+                placesName: placesName,
+                category: category,
+                latitude: lat,
+                longitude: lng
+            )
+            // Bulk-updated siblings — pull fresh state so their merchant
+            // names reflect the new normalized value too.
+            await refresh()
+        } catch {
+            #if DEBUG
+            print("[TransactionStore] applyPlace failed for \(transactionId): \(error)")
+            #endif
+            await refresh()
+        }
+    }
+
     // MARK: - Auto-retry
 
     private func scheduleAutoRetry() {

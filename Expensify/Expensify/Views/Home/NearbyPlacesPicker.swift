@@ -31,7 +31,19 @@ struct NearbyPlacesPicker: View {
                     Button {
                         guard let cat = suggestion.resolvedCategory else { return }
                         Task {
-                            await store.retag(transactionId: transactionId, to: cat)
+                            // Bulk-propagating apply: this row's
+                            // merchantNormalized becomes the storefront
+                            // name, AND every other row with the same
+                            // VPA gets rewritten to match. The user's
+                            // explicit ask — claiming a place once
+                            // fixes their history.
+                            await store.applyPlace(
+                                transactionId: transactionId,
+                                placesName: suggestion.name,
+                                category: cat,
+                                lat: suggestion.lat,
+                                lng: suggestion.lng
+                            )
                         }
                     } label: {
                         suggestionRow(suggestion)

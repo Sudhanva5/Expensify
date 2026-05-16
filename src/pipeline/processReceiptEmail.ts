@@ -15,6 +15,7 @@ import type { ExtractedMessage } from '../gmail/messageBody.js';
 import { prisma } from '../db/client.js';
 import { Prisma } from '@prisma/client';
 import { pickExtractor, isReceiptSender } from '../receipts/extractors.js';
+import { classifyVpa } from '../categorize/vpaShape.js';
 
 export type ReceiptOutcome =
   | { kind: 'skipped_non_receipt'; gmailMessageId: string }
@@ -183,13 +184,24 @@ async function tryBindToTransaction(opts: {
       direction: 'out',
       occurredAt: { gte: since, lte: until },
     },
-    select: { id: true, occurredAt: true, merchantRaw: true, merchantNormalized: true },
+    select: { id: true, occurredAt: true, merchantRaw: true, merchantNormalized: true, vpa: true },
     orderBy: { occurredAt: 'asc' },
   });
 
-  // Require merchant↔source alignment.
-  const aligned = candidates.filter((c) =>
-    merchantMatchesSource(`${c.merchantRaw} ${c.merchantNormalized}`, opts.source),
+  // Strict alignment: require both
+  //   (a) the candidate's merchant text mentions a keyword for the
+  //       receipt's source (Swiggy receipts only bind to Swiggy
+  //       transactions), AND
+  //   (b) the candidate isn't an obvious P2P UPI transfer. UPI
+  //       payments to a personal-shape VPA (firstname@oksbi,
+  //       9876543210@ybl) are person-to-person and NEVER have a
+  //       merchant email receipt. The user explicitly asked: "no
+  //       emails for offline purchases, only for online merchants."
+  //       P2P UPI is the canonical offline case.
+  const aligned = candidates.filter(
+    (c) =>
+      merchantMatchesSource(`${c.merchantRaw} ${c.merchantNormalized}`, opts.source) &&
+      !isPersonalUpiTransfer(c.vpa),
   );
 
   if (aligned.length === 1) {
@@ -201,22 +213,33 @@ async function tryBindToTransaction(opts: {
     return { transactionId: null, reason: 'source_merchant_mismatch' };
   }
   if (candidates.length === 0) {
-    // Relaxed match — same amount, any time. Still requires source alignment.
+    // Relaxed match — same amount, any time. Same alignment + P2P guard.
     const sameAmount = await prisma.transaction.findMany({
       where: {
         amountInrMinor: opts.amountInrMinor,
         direction: 'out',
       },
-      select: { id: true, merchantRaw: true, merchantNormalized: true },
+      select: { id: true, merchantRaw: true, merchantNormalized: true, vpa: true },
     });
-    const sameAmountAligned = sameAmount.filter((c) =>
-      merchantMatchesSource(`${c.merchantRaw} ${c.merchantNormalized}`, opts.source),
+    const sameAmountAligned = sameAmount.filter(
+      (c) =>
+        merchantMatchesSource(`${c.merchantRaw} ${c.merchantNormalized}`, opts.source) &&
+        !isPersonalUpiTransfer(c.vpa),
     );
     if (sameAmountAligned.length === 1) {
       return { transactionId: sameAmountAligned[0]!.id, reason: 'amount_only' };
     }
   }
   return { transactionId: null, reason: 'no_match' };
+}
+
+/// True when a VPA looks like a personal UPI handle — name@oksbi,
+/// 9876543210@ybl, etc. P2P transfers never have a merchant receipt.
+/// Centralized here so the guard reads cleanly inside the candidate
+/// filter.
+function isPersonalUpiTransfer(vpa: string | null): boolean {
+  if (!vpa) return false;
+  return classifyVpa(vpa) === 'personal';
 }
 
 /**

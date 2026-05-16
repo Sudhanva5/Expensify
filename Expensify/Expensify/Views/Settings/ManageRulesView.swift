@@ -8,6 +8,7 @@ struct ManageRulesView: View {
     @State private var rules: [UserRule] = []
     @State private var loadState: LoadState = .idle
     @State private var loadError: String?
+    @State private var showEditor: Bool = false
 
     enum LoadState { case idle, loading, loaded }
 
@@ -40,10 +41,24 @@ struct ManageRulesView: View {
         .refreshable { await load() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                if loadState == .loading {
-                    ProgressView().controlSize(.small)
+                HStack(spacing: 12) {
+                    if loadState == .loading {
+                        ProgressView().controlSize(.small)
+                    }
+                    Button {
+                        showEditor = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(AppColor.textPrimary)
+                    }
                 }
             }
+        }
+        .sheet(isPresented: $showEditor) {
+            RuleEditorSheet(onSaved: {
+                Task { await load() }
+            })
         }
     }
 

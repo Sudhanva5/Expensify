@@ -9,6 +9,7 @@
 // Usage: DATABASE_URL=... npx tsx scripts/unbind-mismatched-receipts.ts
 
 import { prisma } from '../src/db/client.js';
+import { classifyVpa } from '../src/categorize/vpaShape.js';
 
 const SOURCE_MERCHANT_KEYWORDS: Record<string, RegExp> = {
   swiggy: /swiggy|bundl/i,
@@ -29,7 +30,7 @@ async function main() {
     where: { transactionId: { not: null } },
     include: {
       transaction: {
-        select: { id: true, merchantRaw: true, merchantNormalized: true },
+        select: { id: true, merchantRaw: true, merchantNormalized: true, vpa: true },
       },
     },
   });
@@ -39,13 +40,23 @@ async function main() {
   let unbound = 0;
   for (const r of bound) {
     if (!r.transaction) continue;
+
+    // Reason 1: source ↔ merchant keyword mismatch (existing guard).
     const re = SOURCE_MERCHANT_KEYWORDS[r.source];
     const text = `${r.transaction.merchantRaw} ${r.transaction.merchantNormalized}`;
     const aligned = re ? re.test(text) : false;
-    if (aligned) continue;
 
+    // Reason 2: bound to a P2P UPI VPA. The user's "no emails for
+    // offline purchases" rule — personal-shape VPAs are never online
+    // merchants, so any receipt that landed on one is a wrong bind.
+    const isP2P =
+      r.transaction.vpa !== null && classifyVpa(r.transaction.vpa) === 'personal';
+
+    if (aligned && !isP2P) continue;
+
+    const reason = !aligned ? 'source_mismatch' : 'p2p_vpa';
     console.log(
-      `  unbind ${r.id} (${r.source}) — tx merchant "${r.transaction.merchantRaw.slice(0, 40)}" doesn't match`,
+      `  unbind ${r.id} (${r.source}, ${reason}) — tx merchant "${r.transaction.merchantRaw.slice(0, 40)}"`,
     );
     await prisma.emailReceipt.update({
       where: { id: r.id },
