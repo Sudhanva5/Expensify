@@ -221,6 +221,29 @@ describe('HDFC parser — Template E: RuPay CC UPI debit', () => {
   });
 });
 
+describe('HDFC parser — Template E v2: RuPay CC UPI debit (May 2026 format)', () => {
+  it('parses the new "is debited / ending NNNN / VPA / DD Mon, YYYY" wording', () => {
+    const result = parseHdfcEmail({
+      subject: 'You have done a UPI txn. Check details!',
+      body: loadFixture('cc-upi-debit-v2-paytm.txt'),
+      receivedAt: new Date('2026-05-17T05:01:37Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.template).toBe('cc_upi_debit_v2');
+    expect(result.data.direction).toBe('out');
+    expect(result.data.instrument).toBe('card_2668');
+    expect(result.data.amountMinor).toBe(127500n); // ₹1275.00
+    expect(result.data.vpa).toBe('paytm.d91908873@pty');
+    // No payee name in this format — parser falls back to the VPA's local-part.
+    expect(result.data.merchantRaw).toBe('paytm.d91908873');
+    expect(result.data.externalRef).toBe('184567890123');
+    expect(result.data.isAutopay).toBe(false);
+  });
+});
+
 describe('HDFC parser — upcoming-autopay preview is recognized and skipped', () => {
   it('returns not_a_transaction for the heads-up email', () => {
     const result = parseHdfcEmail({

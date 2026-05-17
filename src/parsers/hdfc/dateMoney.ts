@@ -37,6 +37,17 @@ export function parseDdMmYyyy(s: string, receivedAt: Date): Date {
   return istClockToUtc(Number(m[3]), Number(m[2]) - 1, Number(m[1]), receivedAt);
 }
 
+// "17 May, 2026" (no time). Inherits hh:mm:ss from receivedAt like
+// parseDdMmYy does. Used by the new (May 2026) HDFC CC-UPI debit
+// template which dropped the explicit time field.
+export function parseDdMonYyyy(s: string, receivedAt: Date): Date {
+  const m = /^(\d{1,2})\s+(\w{3}),?\s+(\d{4})$/.exec(s.trim());
+  if (!m) throw new Error(`bad date (DD Mon YYYY): ${s}`);
+  const month = MONTHS[m[2] as keyof typeof MONTHS];
+  if (month === undefined) throw new Error(`bad month: ${m[2]}`);
+  return istClockToUtc(Number(m[3]), month, Number(m[1]), receivedAt);
+}
+
 // "09 May, 2026" + "10:57:54" → IST clock-time as UTC Date
 export function parseDdMonYyyyHms(dateStr: string, timeStr: string): Date {
   const dm = /^(\d{1,2})\s+(\w{3}),\s+(\d{4})$/.exec(dateStr);
