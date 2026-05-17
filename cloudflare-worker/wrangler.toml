@@ -1,0 +1,18 @@
+# Cloudflare Workers config. Deploy:
+#   cd cloudflare-worker
+#   npx wrangler login         # one-time, opens browser
+#   npx wrangler deploy        # builds + deploys; prints the final URL
+
+name = "expensify-proxy"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+
+# Free-tier defaults. Workers free plan: 100k req/day, 10ms CPU per
+# request. Reverse-proxy CPU is well under 1ms so we won't hit the
+# CPU limit even under heavy use.
+workers_dev = true
+
+# Observability is off by default for personal projects — turn on if
+# you want Workers Logs (~$5/mo above free-tier traces).
+[observability]
+enabled = false

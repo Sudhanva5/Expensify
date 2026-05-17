@@ -1,0 +1,16 @@
+{
+  "name": "expensify-proxy",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Cloudflare Worker that reverse-proxies expensify-production.up.railway.app. Used to dodge Jio's flaky DPI on the custom domain.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260101.0",
+    "typescript": "^5.4.0",
+    "wrangler": "^3.80.0"
+  }
+}
