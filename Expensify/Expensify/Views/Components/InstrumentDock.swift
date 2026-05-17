@@ -12,40 +12,57 @@ struct InstrumentDock: View {
     }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                DockChip(
-                    icon: nil,
-                    label: "all",
-                    count: totalCount,
-                    isSelected: selected == nil
-                ) {
-                    selected = nil
-                }
-                ForEach(instruments, id: \.instrument) { entry in
+        // ScrollViewReader lets us auto-center the tapped chip so the
+        // dock never "jumps" — if the user taps a chip that's partially
+        // off-screen, it scrolls into view animatedly instead of the
+        // chip moving under their finger.
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
                     DockChip(
-                        icon: Self.iconFor(entry.instrument),
-                        label: InstrumentLabel.display(for: entry.instrument).lowercased(),
-                        count: entry.count,
-                        isSelected: selected == entry.instrument
+                        icon: nil,
+                        label: "all",
+                        count: totalCount,
+                        isSelected: selected == nil
                     ) {
-                        selected = entry.instrument
+                        selected = nil
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            proxy.scrollTo("dock-all", anchor: .center)
+                        }
+                    }
+                    .id("dock-all")
+                    ForEach(instruments, id: \.instrument) { entry in
+                        DockChip(
+                            icon: Self.iconFor(entry.instrument),
+                            label: InstrumentLabel.display(for: entry.instrument).lowercased(),
+                            count: entry.count,
+                            isSelected: selected == entry.instrument
+                        ) {
+                            selected = entry.instrument
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                proxy.scrollTo(entry.instrument, anchor: .center)
+                            }
+                        }
+                        .id(entry.instrument)
                     }
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            // Scroll lives INSIDE the dock visual; the background is on
+            // the ScrollView itself so the capsule sizes to the visible
+            // viewport, not the (potentially overflowing) content.
+            .background(
+                Capsule()
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        Capsule().stroke(AppColor.hairline.opacity(0.6), lineWidth: 0.5)
+                    )
+                    .shadow(color: .black.opacity(0.06), radius: 14, x: 0, y: 8)
+            )
+            .padding(.horizontal, 24)
+            .padding(.bottom, 12)
         }
-        .background(
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule().stroke(AppColor.hairline.opacity(0.6), lineWidth: 0.5)
-                )
-                .shadow(color: .black.opacity(0.06), radius: 14, x: 0, y: 8)
-        )
-        .padding(.horizontal, 24)
-        .padding(.bottom, 8)
     }
 
     /// SF Symbol that reflects the instrument type.
@@ -78,11 +95,18 @@ private struct DockChip: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(isSelected ? .white.opacity(0.8) : AppColor.textTertiary)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10) // bumps the chip touch target to ~44pt
             .background(isSelected ? AppColor.textPrimary : .clear)
             .foregroundStyle(isSelected ? .white : AppColor.textPrimary)
             .clipShape(Capsule())
+            // contentShape ensures the WHOLE capsule (including padding)
+            // is the tap surface; without this, taps inside the gap
+            // between the icon and the label can miss and bubble to
+            // the parent ScrollView as a pan, dragging instead of
+            // selecting. This is the "doesn't get clicked properly"
+            // class of bug.
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
     }

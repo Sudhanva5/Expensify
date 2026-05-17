@@ -42,37 +42,45 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .bottom) {
-                AppColor.canvas.ignoresSafeArea()
-
-                content
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .background(AppColor.canvas)
-                    .refreshable { await store.refresh() }
-                    .task {
-                        if store.transactions.isEmpty { await store.refresh() }
+            content
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(AppColor.canvas)
+                .refreshable { await store.refresh() }
+                .task {
+                    if store.transactions.isEmpty { await store.refresh() }
+                }
+                .connectivityBanner(store: store)
+                // Dock as a bottom safe-area inset, NOT a ZStack overlay.
+                //   • Inset means the list naturally ends above the dock —
+                //     no list rows hide behind the floating capsule, and
+                //     the last row never collides with the chips.
+                //   • SwiftUI inserts the inset *above* the tab-bar safe
+                //     area, so the dock can't get squashed by tab-bar
+                //     height changes, badge animations, or the keyboard.
+                //   • Tap routing improves too: chips are no longer
+                //     competing for hit-test with scrollable list rows
+                //     they sit over.
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if availableInstruments.count > 1 {
+                        InstrumentDock(
+                            instruments: availableInstruments,
+                            selected: $instrumentFilter
+                        )
                     }
-                    .connectivityBanner(store: store)
-
-                if availableInstruments.count > 1 {
-                    InstrumentDock(
-                        instruments: availableInstruments,
-                        selected: $instrumentFilter
-                    )
                 }
-            }
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    AvatarButton(initials: CurrentUser.initials) { showSettings = true }
+                .background(AppColor.canvas.ignoresSafeArea())
+                .navigationTitle("")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        AvatarButton(initials: CurrentUser.initials) { showSettings = true }
+                    }
                 }
-            }
-            .sheet(item: $editingTagFor) { tx in
-                CategoryPickerSheet(transaction: tx)
-                    .environment(store)
-            }
+                .sheet(item: $editingTagFor) { tx in
+                    CategoryPickerSheet(transaction: tx)
+                        .environment(store)
+                }
         }
     }
 
@@ -156,14 +164,6 @@ struct HomeView: View {
                     }
                 }
 
-                // Bottom padding so the instrument dock doesn't overlap the
-                // last row.
-                Section {
-                    Color.clear
-                        .frame(height: 80)
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                }
             }
         }
     }
