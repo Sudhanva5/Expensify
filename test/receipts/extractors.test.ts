@@ -103,6 +103,28 @@ describe('extractSwiggy', () => {
     expect(r).toBeNull();
   });
 
+  it('extracts total from "Paid Via Credit/Debit card" with amount on next line', () => {
+    // Real failure case from 2026-05-17: the bill section ends with
+    //   "Paid Via Credit/Debit card \n ₹278.00"
+    // The old regex required `\w+` then `₹` directly after, which broke
+    // on the "/Debit card" form because `/` isn't a word char and the
+    // amount sat on a fresh line.
+    const body = `
+      ORDER JOURNEY
+      Restaurant May 17, 2:43 PM
+      Sudhanva 560035 May 17, 3:18 PM
+      Order ID: 237978826706201
+      BILL DETAILS
+      Pappu Rice Bowl x1 ₹268
+      Taxes ₹12.90
+      Paid Via Credit/Debit card
+      ₹278.00
+    `;
+    const r = extractSwiggy(body);
+    expect(r).not.toBeNull();
+    expect(r!.amountInrMinor).toBe(27800n);
+  });
+
   it('returns null for marketing-only Swiggy email (no bill details)', () => {
     const r = extractSwiggy('Get 20% off your next order! ORDER JOURNEY...');
     expect(r).toBeNull();

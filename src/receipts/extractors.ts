@@ -118,8 +118,18 @@ export function extractSwiggy(plainText: string): ExtractedReceipt | null {
   const orderMatch = plainText.match(orderRe);
   if (orderMatch?.[1]) result.orderId = orderMatch[1];
 
-  // Total — the line "Paid Via <X> ₹308.00"
-  const totalRe = /Paid\s+Via\s+\w+\s*₹?\s*([0-9][0-9,]*(?:\.\d{1,2})?)/i;
+  // Total — Swiggy writes the payment method line as one of:
+  //   "Paid Via Bank ₹308.00"               (single-word method)
+  //   "Paid Via Credit/Debit card\n₹278.00" (multi-word, amount on next line)
+  //   "Paid Via UPI ₹120"
+  //
+  // The old regex required `\w+` then `₹` directly after, which broke on
+  // the "/Debit card" form because '/' isn't a word char and the amount
+  // sat on a fresh line. The new pattern allows any non-₹/non-newline
+  // payment-method text in between, then skips any amount of whitespace
+  // (including the newline) before the ₹.
+  const totalRe =
+    /Paid\s+Via\s+[^₹\n]+\s*₹\s*([0-9][0-9,]*(?:\.\d{1,2})?)/i;
   const totalMatch = plainText.match(totalRe);
   if (totalMatch?.[1]) {
     const n = Number(totalMatch[1].replace(/,/g, ''));
