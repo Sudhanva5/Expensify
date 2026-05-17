@@ -8,14 +8,24 @@ import Foundation
 nonisolated enum Constants {
     /// Production URL of the backend.
     ///
-    /// Why a custom domain instead of the Railway-provided
-    /// `expensify-production.up.railway.app`: Indian carriers (Jio /
-    /// Airtel / VI) silently DNS-filter the entire `*.up.railway.app`
-    /// TLD as part of their "safe browsing" rules, which made the iOS
-    /// app fail to reach the backend on cellular. Our own domain is
-    /// unfiltered. Railway routes by Host header, so this maps to the
-    /// same Fastify service in the same project.
-    static let baseURL: URL = URL(string: "https://expensify.sudhanva.space")!
+    /// The route goes through a Cloudflare Worker that reverse-proxies
+    /// the Railway backend. Why:
+    ///
+    ///   1. Indian carriers (Jio / Airtel / VI) silently DNS-filter the
+    ///      entire `*.up.railway.app` TLD as part of "safe browsing"
+    ///      rules. Direct calls fail on cellular.
+    ///   2. Our custom Cloudflare-proxied domain
+    ///      (`expensify.sudhanva.space`) bypassed (1) for a while, but
+    ///      Jio's DPI started throttling it at random times.
+    ///   3. A Worker on `*.workers.dev` lives on a different anycast IP
+    ///      pool AND the Host header is shared with millions of CF
+    ///      customers — Jio can't single it out without breaking a huge
+    ///      chunk of the internet.
+    ///
+    /// Worker source: `cloudflare-worker/src/index.ts` — replays method /
+    /// headers / body verbatim against the Railway origin, so every
+    /// endpoint works transparently.
+    static let baseURL: URL = URL(string: "https://expensify-proxy.sudhanva-udupi55.workers.dev")!
 
     /// Static API token shared between iOS and backend. Generate any random
     /// 32+ char string. Set the *same* value on Railway as `API_TOKEN`.
