@@ -12,6 +12,7 @@ import { prisma } from '../db/client.js';
 import type { CategorizeContext, Enrichment } from '../categorize/types.js';
 import type { ParsedTransaction } from '../parsers/hdfc/index.js';
 import { checkBudgetForCategory } from './budgetAlerts.js';
+import { sendParserMissedAlert } from '../services/apns.js';
 import { detectOnlineMerchant } from '../categorize/onlineMerchant.js';
 
 export type ProcessOutcome =
@@ -156,6 +157,17 @@ export async function processGmailMessage(
       rawSnippet: msg.snippet || msg.body.slice(0, 200),
       parseError: parseResult.details,
     });
+    // Fire-and-forget: tell the user we just dropped a real HDFC email.
+    // This is how we caught the May-2026 template change. Dedupe + APNs
+    // fan-out lives inside sendParserMissedAlert — once per 24h max.
+    void sendParserMissedAlert({
+      gmailMessageId: msg.id,
+      rawSubject: msg.subject,
+      rawSnippet: msg.snippet || msg.body.slice(0, 200),
+      parseError: parseResult.details,
+    }).catch((err) =>
+      console.error('[processGmailMessage] parser-miss alert failed:', err),
+    );
     return {
       kind: 'parse_failed',
       gmailMessageId: msg.id,

@@ -206,6 +206,69 @@ export async function sendBudgetAlertToAllDevices(args: BudgetAlertArgs): Promis
   }
 }
 
+interface ParserMissedAlertArgs {
+  gmailMessageId: string;
+  rawSubject: string;
+  rawSnippet: string;
+  parseError: string | null;
+}
+
+/// Fire a "parser missed an email" push when an HDFC alert arrived but
+/// none of our six templates matched. The point is to detect HDFC
+/// silently changing a template (which is exactly what happened on
+/// 2026-05-17 with the new "is debited / ending NNNN / DD Mon, YYYY"
+/// CC-UPI debit format — we missed a real ₹1275 transaction before
+/// anyone noticed).
+///
+/// Dedupe rule: don't fire if there's already an `unknown_hdfc` row
+/// within the past 24 hours — the user only needs to be told ONCE that
+/// the parser is broken, not once per missed email. The persistent
+/// `EmailMessage` row is the dedupe state; no extra table needed.
+///
+/// Fan-out reuses `sendVisiblePush` per registered device.
+export async function sendParserMissedAlert(args: ParserMissedAlertArgs): Promise<void> {
+  // Dedupe: count *other* unknown_hdfc rows in the last 24h. The current
+  // row is excluded so the first miss after a 24h quiet period still
+  // fires.
+  const since = new Date(Date.now() - 24 * 3600 * 1000);
+  const recentUnparsedOther = await prisma.emailMessage.count({
+    where: {
+      kind: 'unknown_hdfc',
+      gmailMessageId: { not: args.gmailMessageId },
+      receivedAt: { gte: since },
+    },
+  });
+  if (recentUnparsedOther > 0) {
+    console.log(
+      `[parser-miss-alert] skipping push — ${recentUnparsedOther} other unparsed HDFC email(s) in the last 24h`,
+    );
+    return;
+  }
+
+  const devices = await prisma.deviceToken.findMany();
+  if (devices.length === 0) return;
+
+  const snippet = args.rawSnippet.slice(0, 110).trim();
+  const title = '⚠ Parser missed an HDFC email';
+  const body = snippet.length > 0
+    ? `Likely template change. "${snippet}…"`
+    : `Likely template change. Subject: "${args.rawSubject.slice(0, 80)}"`;
+
+  for (const d of devices) {
+    await sendVisiblePush({
+      apnsToken: d.apnsToken,
+      title,
+      body,
+      payload: {
+        kind: 'parser_missed',
+        gmailMessageId: args.gmailMessageId,
+        parseError: args.parseError,
+      },
+    });
+  }
+  console.log(`[parser-miss-alert] fired for ${args.gmailMessageId} → ${devices.length} device(s)`);
+}
+
 /// Cleanup hook so tests / shutdown don't leak the HTTPS connection.
 export function shutdownAPNs(): void {
   provider?.shutdown();
