@@ -125,16 +125,54 @@ enum MerchantBranding {
         if let exact = domainMap.first(where: { $0.key.caseInsensitiveCompare(trimmed) == .orderedSame }) {
             return exact.value
         }
+
+        // Amazon Pay marketplace pattern: "amznpl<brand>v<digits>" where
+        // <brand> is the actual merchant (e.g. `amznplpvrv2033702` →
+        // PVR). Strip the rail prefix + trailing transaction id and try
+        // to map the inner brand FIRST, before the generic substring
+        // search would otherwise see "AMZN" and return Amazon's logo.
+        // The user paid PVR; Amazon Pay was just the rail.
+        if let amazonPayBrand = extractAmazonPayBrand(trimmed),
+           let hit = lookupSubstring(amazonPayBrand) {
+            return hit
+        }
+
         // Substring match — prefer the LONGEST matching key. Otherwise
         // "Google" would beat "Google Cloud" on input like
         // "PAYU*Google Cloud Platform Charge", giving the wrong favicon.
+        return lookupSubstring(trimmed)
+    }
+
+    /// Longest-key-wins substring search through the brand map.
+    private static func lookupSubstring(_ haystack: String) -> String? {
         let sortedKeys = domainMap.keys.sorted { $0.count > $1.count }
         for key in sortedKeys {
-            if trimmed.range(of: key, options: .caseInsensitive) != nil {
+            if haystack.range(of: key, options: .caseInsensitive) != nil {
                 return domainMap[key]
             }
         }
         return nil
+    }
+
+    /// If `merchantRaw` is an Amazon Pay marketplace string, return the
+    /// inner brand identifier. Pattern: `amznpl<letters><digits-or-v>...`
+    ///   • `amznplpvrv2033702`  → "pvr"     (PVR cinemas)
+    ///   • `amznplbms` + suffix → "bms"     (BookMyShow)
+    ///   • `amznplnykaa…`       → "nykaa"   (Nykaa)
+    /// Returns nil for non-Amazon-Pay payee strings.
+    private static func extractAmazonPayBrand(_ s: String) -> String? {
+        let lower = s.lowercased()
+        guard lower.hasPrefix("amznpl") else { return nil }
+        // Step past the rail prefix and take consecutive letters.
+        var brand = ""
+        for ch in lower.dropFirst("amznpl".count) {
+            if ch.isLetter {
+                brand.append(ch)
+            } else {
+                break
+            }
+        }
+        return brand.count >= 2 ? brand : nil
     }
 
     /// Two-character initials for the merchant avatar fallback.
