@@ -313,6 +313,62 @@ export function extractInstamart(plainText: string): ExtractedReceipt | null {
   return result;
 }
 
+// === redBus parser ====================================================
+
+/**
+ * redBus ticket emails. The receipt shows "Ticket Price Rs. 3067.95
+ * (inclusive of GST)" — but if the user redeemed a coupon, the
+ * line "Hurray!! You have saved Rs 150.00 on this booking" sits
+ * above it, and the actual card debit is the *net* (gross − savings).
+ *
+ * Without subtracting the savings, every coupon-discounted booking
+ * fails to bind to its HDFC transaction (binder requires exact
+ * amount match). This parser does that subtraction so the receipt
+ * carries the net amount that hits the card.
+ */
+export function extractRedbus(plainText: string): ExtractedReceipt {
+  const result: ExtractedReceipt = {
+    amountInrMinor: null,
+    orderId: null,
+    items: [],
+    fees: [],
+    meta: {},
+    parserVersion: 'redbus.v1',
+  };
+
+  // Ticket / PNR numbers from the subject pattern reBus puts in the body
+  // ("Ticket Number: TV6J17963815   |   PNR No: 3534708").
+  const ticketM = plainText.match(/Ticket\s+Number\s*:\s*([A-Z0-9]+)/i);
+  if (ticketM?.[1]) result.orderId = ticketM[1];
+
+  const grossM = plainText.match(/Ticket\s+Price[^₹\d\n]{0,40}(?:Rs\.?|₹)\s*([0-9][0-9,.]*)/i);
+  const savedM = plainText.match(/You\s+have\s+saved\s+Rs[.\s]*([0-9][0-9,.]*)/i);
+  if (grossM?.[1]) {
+    const gross = Number(grossM[1].replace(/,/g, ''));
+    const saved = savedM?.[1] ? Number(savedM[1].replace(/,/g, '')) : 0;
+    const net = gross - saved;
+    if (Number.isFinite(net) && net > 0) {
+      result.amountInrMinor = BigInt(Math.round(net * 100));
+      if (saved > 0) {
+        result.fees!.push({ name: 'Coupon savings', amountInr: -saved });
+      }
+    }
+  }
+
+  // Best-effort journey / travels for the detail sheet.
+  const travelsM = plainText.match(/Travels\s+([A-Z][^\n]{2,80}?)\s*(?:Bharat|Volvo|Scania|Mercedes|AC|Non[\s-]?AC|Sleeper|Seater)/i);
+  if (travelsM?.[1]) result.meta!['operator'] = travelsM[1].trim();
+  const dateM = plainText.match(/Journey\s+Date\s+and\s+Time\s+(\d{2}\/\d{2}\/\d{4},\s*\d{2}:\d{2}\s*(?:AM|PM)?)/i);
+  if (dateM?.[1]) result.meta!['journeyDateTime'] = dateM[1];
+
+  // Fall through to universal if nothing landed — at least give the row
+  // something to display.
+  if (result.amountInrMinor === null && !result.orderId) {
+    return extractUniversal(plainText);
+  }
+  return result;
+}
+
 // === Sender → extractor router =========================================
 
 /**
@@ -357,7 +413,7 @@ export function pickExtractor(fromAddress: string): {
     return { source: 'travel', extract: extractUniversal };
   }
   if (addr.includes('redbus.') || addr.includes('@redbus')) {
-    return { source: 'redbus', extract: extractUniversal };
+    return { source: 'redbus', extract: extractRedbus };
   }
   if (addr.includes('airbnb.')) {
     return { source: 'airbnb', extract: extractUniversal };
