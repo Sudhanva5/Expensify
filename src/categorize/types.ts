@@ -4,7 +4,7 @@ export const CATEGORIES = [
   'Travel',
   'Food',
   'Entertainment',
-  'Groceries / Kirana Stores',
+  'Shopping',
   'Personal Transfer (Peer-to-Peer)',
   'Investments',
   'Subscriptions',

@@ -118,7 +118,7 @@ export async function processGmailMessage(
   ctx: CategorizeContext,
   enrichment: Enrichment = {},
 ): Promise<ProcessOutcome> {
-  if (!isLikelyHdfcAlert(msg.fromAddress)) {
+  if (!isLikelyHdfcAlert(msg.fromAddress, msg.subject)) {
     return {
       kind: 'skipped_non_hdfc',
       gmailMessageId: msg.id,

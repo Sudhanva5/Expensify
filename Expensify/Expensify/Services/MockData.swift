@@ -176,7 +176,7 @@ enum MockData {
         Budget(category: .food, monthlyLimitInr: 5000),
         Budget(category: .travel, monthlyLimitInr: 3000),
         Budget(category: .entertainment, monthlyLimitInr: 1500),
-        Budget(category: .groceries, monthlyLimitInr: 2000),
+        Budget(category: .shopping, monthlyLimitInr: 2000),
         Budget(category: .personalTransfer, monthlyLimitInr: nil),
         Budget(category: .investments, monthlyLimitInr: nil),
         Budget(category: .subscriptions, monthlyLimitInr: 800),

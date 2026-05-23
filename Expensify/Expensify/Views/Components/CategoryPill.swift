@@ -27,7 +27,7 @@ struct CategoryPill: View {
     VStack(alignment: .leading, spacing: 8) {
         CategoryPill(category: .food)
         CategoryPill(category: .travel)
-        CategoryPill(category: .groceries, compact: true)
+        CategoryPill(category: .shopping, compact: true)
         CategoryPill(category: .personalTransfer)
         CategoryPill(category: .subscriptions)
     }

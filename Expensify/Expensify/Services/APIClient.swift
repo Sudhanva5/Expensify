@@ -212,10 +212,13 @@ actor APIClient {
             enabled: budget.enabled
         )
 
-        // Critical: .urlPathAllowed lets `/` through unencoded. That makes
-        // "Groceries / Kirana Stores" decode into THREE path segments at the
-        // Fastify side, missing the /:categoryName route and returning 404.
-        // Subtract `/` so the slash gets %2F-encoded.
+        // Critical: .urlPathAllowed lets `/` through unencoded. With the
+        // older "Groceries / Kirana Stores" category name the bare `/`
+        // decoded into THREE path segments at the Fastify side, missing
+        // the /:categoryName route and returning 404. The name has since
+        // been renamed to "Shopping", but the guard stays in case any
+        // future category name contains a slash. Subtract `/` so the
+        // slash gets %2F-encoded.
         // We also bypass URL.appendingPathComponent here because it re-
         // decodes the %2F back to a literal `/` on some iOS versions —
         // build the full URL string directly and parse it instead.

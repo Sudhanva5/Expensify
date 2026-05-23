@@ -6,7 +6,7 @@ enum Category: String, CaseIterable, Identifiable, Codable, Hashable {
     case travel = "Travel"
     case food = "Food"
     case entertainment = "Entertainment"
-    case groceries = "Groceries / Kirana Stores"
+    case shopping = "Shopping"
     case personalTransfer = "Personal Transfer (Peer-to-Peer)"
     case investments = "Investments"
     case subscriptions = "Subscriptions"
@@ -19,7 +19,7 @@ enum Category: String, CaseIterable, Identifiable, Codable, Hashable {
         case .travel: return "Travel"
         case .food: return "Food"
         case .entertainment: return "Entertainment"
-        case .groceries: return "Groceries"
+        case .shopping: return "Shopping"
         case .personalTransfer: return "P2P"
         case .investments: return "Investments"
         case .subscriptions: return "Subscriptions"
@@ -32,7 +32,7 @@ enum Category: String, CaseIterable, Identifiable, Codable, Hashable {
         case .travel: return "airplane"
         case .food: return "fork.knife"
         case .entertainment: return "popcorn"
-        case .groceries: return "basket"
+        case .shopping: return "bag.fill"
         case .personalTransfer: return "person.2"
         case .investments: return "chart.line.uptrend.xyaxis"
         case .subscriptions: return "rectangle.stack.badge.play"
@@ -45,7 +45,7 @@ enum Category: String, CaseIterable, Identifiable, Codable, Hashable {
         case .travel: return .blue
         case .food: return .orange
         case .entertainment: return .pink
-        case .groceries: return .green
+        case .shopping: return .green
         case .personalTransfer: return .purple
         case .investments: return .indigo
         case .subscriptions: return .teal

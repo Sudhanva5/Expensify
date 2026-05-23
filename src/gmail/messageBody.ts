@@ -150,7 +150,43 @@ const HDFC_FROM_PATTERNS = [
   /\bHDFC Bank\b/i,
 ];
 
-export function isLikelyHdfcAlert(fromAddress: string | null): boolean {
+// HDFC sends a steady stream of marketing emails from the SAME sender
+// as transaction alerts ("Loan Limit Boosted to ₹7.5 Lacs",
+// "Customer, get your dream car", "🎁 still haven't claimed your Rs.
+// 800 voucher"). They look like alerts to the from-address filter,
+// fail every transaction parser, and trigger our parser-miss push
+// alert as if HDFC had changed a template. Subject-level blacklist
+// short-circuits these as "not a transaction" before they ever hit
+// the parser chain.
+const MARKETING_SUBJECT_PATTERNS = [
+  /\bloan\b/i,
+  /\bsmart\s*emi\b/i,
+  /\bemi loan\b/i,
+  /\bvoucher\b/i,
+  /\blimit boosted\b/i,
+  /\bcongratulations\b/i,
+  /\breward(s)?\b/i,
+  /\bcashback\b/i,
+  /\bdiscount\b/i,
+  /\bdream car\b/i,
+  /\bclaim(ed)?\s+(your|the)\b/i,
+  /\bpre-?approved\b/i,
+  /\bcredit\s+limit\s+(increase|boost)/i,
+  /\boffer\b/i,
+  /Update:\s/i, // "A/c xx5264 Update: ..." — HDFC's standard marketing prefix
+];
+
+export function isLikelyHdfcAlert(
+  fromAddress: string | null,
+  subject?: string | null,
+): boolean {
   if (!fromAddress) return false;
-  return HDFC_FROM_PATTERNS.some((re) => re.test(fromAddress));
+  if (!HDFC_FROM_PATTERNS.some((re) => re.test(fromAddress))) return false;
+  // Subject is the discriminator between real txn alerts and marketing.
+  // If the caller didn't pass one, fall back to "looks like HDFC" — the
+  // parser will still cleanly return no_template_match downstream.
+  if (subject && MARKETING_SUBJECT_PATTERNS.some((re) => re.test(subject))) {
+    return false;
+  }
+  return true;
 }
