@@ -26,13 +26,15 @@ enum Category: String, CaseIterable, Identifiable, Codable, Hashable {
         }
     }
 
-    /// SF Symbol for the category, used in chips and category rows.
+    /// SF Symbol for the category — all outline / line-weight variants
+    /// so the seven categories read as one consistent set. Filled
+    /// glyphs (.fill suffix) made shopping stand out from its peers.
     var symbolName: String {
         switch self {
         case .travel: return "airplane"
         case .food: return "fork.knife"
         case .entertainment: return "popcorn"
-        case .shopping: return "bag.fill"
+        case .shopping: return "bag"
         case .personalTransfer: return "person.2"
         case .investments: return "chart.line.uptrend.xyaxis"
         case .subscriptions: return "rectangle.stack.badge.play"
