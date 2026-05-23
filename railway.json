@@ -5,10 +5,10 @@
     "buildCommand": "echo 'No build step — running TypeScript via tsx in production'"
   },
   "deploy": {
-    "startCommand": "npm run db:migrate:deploy && npm run db:seed && npm start",
+    "startCommand": "bash -c 'for i in $(seq 1 20); do npm run db:migrate:deploy && break; echo \"db-migrate retry $i in 3s...\"; sleep 3; done && npm run db:seed && npm start'",
     "healthcheckPath": "/health",
-    "healthcheckTimeout": 30,
+    "healthcheckTimeout": 120,
     "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 5
+    "restartPolicyMaxRetries": 10
   }
 }
