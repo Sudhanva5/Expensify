@@ -108,6 +108,22 @@ enum MerchantBranding {
         "HDFC Bank": "hdfcbank.com",
         "Zerodha": "zerodha.com",
         "Groww": "groww.in",
+
+        // Shopping & lifestyle — brands the inner-brand extractor will
+        // expose once we strip transaction IDs and corporate suffixes
+        // from the bank's payee text.
+        "The Souled Store": "thesouledstore.com",
+        "thesouledstore": "thesouledstore.com",
+        "Nykaa": "nykaa.com",
+        "Mamaearth": "mamaearth.in",
+        "boAt": "boat-lifestyle.com",
+        "Boat Lifestyle": "boat-lifestyle.com",
+        "Lenskart": "lenskart.com",
+        "FirstCry": "firstcry.com",
+        "Meesho": "meesho.com",
+        "Ajio": "ajio.com",
+        "Tata Cliq": "tatacliq.com",
+        "Vyapar": "vyaparapp.in",
     ]
 
     /// Look up a merchant name and return the favicon URL if we recognize it.
@@ -126,14 +142,19 @@ enum MerchantBranding {
             return exact.value
         }
 
-        // Amazon Pay marketplace pattern: "amznpl<brand>v<digits>" where
-        // <brand> is the actual merchant (e.g. `amznplpvrv2033702` →
-        // PVR). Strip the rail prefix + trailing transaction id and try
-        // to map the inner brand FIRST, before the generic substring
-        // search would otherwise see "AMZN" and return Amazon's logo.
-        // The user paid PVR; Amazon Pay was just the rail.
-        if let amazonPayBrand = extractAmazonPayBrand(trimmed),
-           let hit = lookupSubstring(amazonPayBrand) {
+        // Cleanup pass: payment-rail prefixes + trailing transaction IDs
+        // + boilerplate corporate suffixes ("Pvt Ltd", "Services", …)
+        // hide the actual brand. Strip them, try the lookup, then fall
+        // through to the raw string if nothing matched.
+        //
+        // Examples:
+        //   amznplpvrv2033702              → "pvrv"        → matches PVR
+        //   thesouledstorepvtltd.63483118  → "thesouledstore" → match if mapped
+        //   nykaaorder123                  → "nykaaorder"  → matches Nykaa
+        //   PAYU*Google Cloud Platform Charge (already pre-stripped by backend)
+        if let cleaned = extractInnerBrand(trimmed),
+           cleaned.caseInsensitiveCompare(trimmed) != .orderedSame,
+           let hit = lookupSubstring(cleaned) {
             return hit
         }
 
@@ -154,25 +175,87 @@ enum MerchantBranding {
         return nil
     }
 
-    /// If `merchantRaw` is an Amazon Pay marketplace string, return the
-    /// inner brand identifier. Pattern: `amznpl<letters><digits-or-v>...`
-    ///   • `amznplpvrv2033702`  → "pvr"     (PVR cinemas)
-    ///   • `amznplbms` + suffix → "bms"     (BookMyShow)
-    ///   • `amznplnykaa…`       → "nykaa"   (Nykaa)
-    /// Returns nil for non-Amazon-Pay payee strings.
-    private static func extractAmazonPayBrand(_ s: String) -> String? {
-        let lower = s.lowercased()
-        guard lower.hasPrefix("amznpl") else { return nil }
-        // Step past the rail prefix and take consecutive letters.
-        var brand = ""
-        for ch in lower.dropFirst("amznpl".count) {
-            if ch.isLetter {
-                brand.append(ch)
-            } else {
+    /// Known payment-rail prefixes that bury the actual merchant. Backend
+    /// `stripRoutingPrefix` already removes the asterisk-separated forms
+    /// (`RAZ*`, `PAYU*`, …) before they reach iOS, so these are the
+    /// alphanumeric-glued variants the backend can't easily detect.
+    private static let railPrefixes = [
+        "amznpl",   // Amazon Pay marketplace: amznpl<brand>v<id>
+        "gpay-",    // Google Pay marketplace: gpay-<brand>-<id>
+        "gpay.",
+        "paytm-",   // Paytm wallet marketplace
+        "paytm.",
+        "mobikwik-",
+        "phonepe-",
+        "php-",     // PHP* rail (e.g. "PHP*REDBUS" — though backend often strips)
+        "php.",
+        "yespay-",
+    ]
+
+    /// Boilerplate corporate suffix tokens to peel off so the brand
+    /// shines through. e.g. "thesouledstorepvtltd" → "thesouledstore".
+    private static let corporateSuffixes = [
+        "privatelimited", "pvtltd", "pvt", "ltd",
+        "limited", "incorporation", "incorporated", "inc",
+        "company", "co", "corporation", "corp",
+        "services", "service", "enterprises", "enterprise",
+        "india", "industries", "industry",
+    ]
+
+    /// Cleanup pipeline:
+    ///   1. lowercase
+    ///   2. drop everything after the LAST separator (`.`, `_`, `*`) — those
+    ///      almost always front transaction IDs
+    ///   3. strip a leading rail prefix if one matches
+    ///   4. strip the trailing digit run (`nykaaorder123` → `nykaaorder`)
+    ///   5. peel off a corporate boilerplate suffix (`pvtltd`, `services`, …)
+    /// Returns nil if cleanup left less than 3 chars (too short to look up
+    /// without false-positives).
+    private static func extractInnerBrand(_ raw: String) -> String? {
+        var s = raw.lowercased()
+
+        // Step 2: everything before the last `.`/`_`/`*` separator. Picks
+        // up `<brand>.<txnid>` and `<brand>_<txnid>`. We only chop when
+        // the suffix is digit-heavy to avoid breaking "amazon.in" etc.
+        for sep in [".", "_", "*"] {
+            if let r = s.range(of: sep, options: .backwards) {
+                let head = String(s[..<r.lowerBound])
+                let tail = String(s[r.upperBound...])
+                let tailDigits = tail.filter { $0.isNumber }.count
+                if tail.count > 0 && tailDigits >= tail.count / 2 {
+                    s = head
+                }
+            }
+        }
+
+        // Step 3: rail prefix
+        for prefix in railPrefixes {
+            if s.hasPrefix(prefix) {
+                s = String(s.dropFirst(prefix.count))
                 break
             }
         }
-        return brand.count >= 2 ? brand : nil
+
+        // Step 4: drop trailing digits (and any single trailing 'v' from
+        // version markers like "pvrv2033702" → after step pre-cleanup
+        // would already be "pvrv"; keep the v but ensure trailing
+        // non-letter runs are gone).
+        while let last = s.last, !last.isLetter {
+            s.removeLast()
+        }
+        // Now scan from the right: drop trailing digit runs.
+        // (After the loop above s ends in a letter, so the only digits
+        // left are in the middle — handled by the substring lookup.)
+
+        // Step 5: peel one corporate suffix.
+        for suffix in corporateSuffixes {
+            if s.hasSuffix(suffix) && s.count > suffix.count + 2 {
+                s = String(s.dropLast(suffix.count))
+                break
+            }
+        }
+
+        return s.count >= 3 ? s : nil
     }
 
     /// Two-character initials for the merchant avatar fallback.
