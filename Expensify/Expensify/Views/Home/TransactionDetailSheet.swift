@@ -175,12 +175,12 @@ struct TransactionDetailSheet: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
-            // Accent blue, NOT textPrimary — in dark mode textPrimary
-            // resolves to near-white, which made the white text vanish
-            // into a white block. Accent blue is the standard call-to-
-            // action background in both modes.
+            // Monochrome inverse pair: bg = tap (dark grey in light /
+            // light grey in dark), fg = canvas (the OPPOSITE: light in
+            // light, dark in dark). Never `.white` literal — that
+            // disappears against tap's near-white dark-mode value.
             .background(AppColor.tap)
-            .foregroundStyle(.white)
+            .foregroundStyle(AppColor.canvas)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)

@@ -93,17 +93,20 @@ private struct DockChip: View {
                     .font(.system(size: 13, weight: .medium))
                 Text("\(count)")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(isSelected ? .white.opacity(0.8) : AppColor.textTertiary)
+                    // canvas.opacity matches the chip's inverse-pair
+                    // foreground; .white was a stale assumption from
+                    // the old accent-blue selected state.
+                    .foregroundStyle(isSelected ? AppColor.canvas.opacity(0.8) : AppColor.textTertiary)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10) // bumps the chip touch target to ~44pt
-            // Selected chip uses the accent blue background, NOT
-            // textPrimary — textPrimary inverts to near-white in dark
-            // mode, which made the selected "all" chip render as a
-            // bright white blob over the canvas. Accent blue contrasts
-            // against the dock's translucent capsule in both modes.
+            // Selected chip: monochrome inverse-of-canvas pair.
+            //   bg = tap (dark grey in light / light grey in dark)
+            //   fg = canvas (the opposite tone, always readable)
+            // Unselected stays clear over the translucent capsule
+            // backing so the dock reads as one continuous pill.
             .background(isSelected ? AppColor.tap : .clear)
-            .foregroundStyle(isSelected ? .white : AppColor.textPrimary)
+            .foregroundStyle(isSelected ? AppColor.canvas : AppColor.textPrimary)
             .clipShape(Capsule())
             // contentShape ensures the WHOLE capsule (including padding)
             // is the tap surface; without this, taps inside the gap

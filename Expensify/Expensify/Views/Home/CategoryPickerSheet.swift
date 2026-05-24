@@ -28,6 +28,13 @@ struct CategoryPickerSheet: View {
     /// Snapshot of the pinned contact name, refreshed on appear and on
     /// every successful pick so the sheet shows the current state.
     @State private var pinnedName: String?
+    /// Drives the rename alert that lets the user edit the merchant
+    /// display name. On submit, fires apply-place which (a) updates
+    /// THIS row's merchantNormalized and (b) bulk-updates every other
+    /// row with the same VPA to the new name.
+    @State private var showingRenamePrompt: Bool = false
+    @State private var renameDraft: String = ""
+    @State private var renaming: Bool = false
 
     /// True when this row is eligible for a contact pin. Any UPI flow
     /// from a bank account — inbound OR outbound — whose VPA isn't a
@@ -40,13 +47,15 @@ struct CategoryPickerSheet: View {
         return !ContactsService.isMerchantVpaPublic(vpa)
     }
 
-    /// Content-sized detent. header (~72 with the action one-liner) +
-    /// divider + 7 category rows (~48 each) + optional pin row (~48 +
-    /// divider ~12) + bottom cushion. Grows only when the pin row is
+    /// Content-sized detent. header (~72) + 7 category rows (~48 each)
+    /// + rename row (~48 + divider) + optional pin row (~48 + divider)
+    /// + bottom cushion. Grows depending on which optional rows are
     /// actually shown.
     private var sheetHeight: CGFloat {
         let base: CGFloat = 490
-        return canPinContact ? base + 64 : base
+        let renameRow: CGFloat = 56 // always shown
+        let pinRow: CGFloat = canPinContact ? 64 : 0
+        return base + renameRow + pinRow
     }
 
     var body: some View {
@@ -57,6 +66,8 @@ struct CategoryPickerSheet: View {
                 header
                 Divider().opacity(0.4)
                 categoryList
+                Divider().opacity(0.4)
+                renameRow
                 if canPinContact {
                     Divider().opacity(0.4)
                     contactPinRow
@@ -68,6 +79,21 @@ struct CategoryPickerSheet: View {
         .presentationDetents([.height(sheetHeight)])
         .presentationDragIndicator(.visible)
         .presentationBackground(AppColor.canvas)
+        .alert("rename merchant", isPresented: $showingRenamePrompt) {
+            TextField("display name", text: $renameDraft)
+                .textInputAutocapitalization(.words)
+            Button("cancel", role: .cancel) {}
+            Button(renaming ? "saving…" : "save") {
+                Task { await submitRename() }
+            }
+            .disabled(renaming || renameDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+        } message: {
+            if let vpa = transaction.vpa, !vpa.isEmpty {
+                Text("applies to all transactions on \(vpa).")
+            } else {
+                Text("applies to this transaction only — it has no VPA to propagate against.")
+            }
+        }
         .sheet(isPresented: $showingContactPicker) {
             ContactPickerSheet(
                 onPick: { cn in
@@ -138,6 +164,32 @@ struct CategoryPickerSheet: View {
     /// square icon, 15pt medium title, optional secondary caption when
     /// already pinned. Reads as part of the same "edit details" list
     /// instead of a tacked-on footer.
+    @ViewBuilder
+    /// Lets the user override the merchant display name. When the row
+    /// has a VPA, the rename bulk-applies to every other transaction
+    /// with the same VPA — same propagation flow as claiming a Nearby
+    /// Places suggestion. The user can give an opaque "PAYTMQR…" payee
+    /// a human-readable name once and have it stick across history +
+    /// future debits (the backend stores the name in VpaPattern so
+    /// fresh inbound transactions adopt it on first parse).
+    @ViewBuilder
+    private var renameRow: some View {
+        Button {
+            renameDraft = transaction.displayMerchant
+            showingRenamePrompt = true
+        } label: {
+            rowLayout(
+                icon: "pencil",
+                title: "rename merchant",
+                subtitle: transaction.vpa.map { "applies to \($0)" }
+                    ?? "applies to this row only",
+                accessory: .chevron,
+                highlighted: true
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
     private var contactPinRow: some View {
         Button {
@@ -225,6 +277,28 @@ struct CategoryPickerSheet: View {
     private func pick(_ category: Category) {
         let txId = transaction.id
         Task { await store.retag(transactionId: txId, to: category) }
+        dismiss()
+    }
+
+    /// Submit the rename. Reuses `applyPlace` on the store — same
+    /// endpoint used by the Nearby Places picker: writes
+    /// merchantNormalized on this row + bulk-updates every other row
+    /// with the same VPA + records VpaPattern.merchantName so future
+    /// debits adopt the name on first parse.
+    private func submitRename() async {
+        renaming = true
+        defer { renaming = false }
+        let name = renameDraft.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        // Keep the row's existing category — the rename is name-only.
+        let cat = transaction.category ?? .personalTransfer
+        await store.applyPlace(
+            transactionId: transaction.id,
+            placesName: name,
+            category: cat,
+            lat: nil,
+            lng: nil
+        )
         dismiss()
     }
 }
