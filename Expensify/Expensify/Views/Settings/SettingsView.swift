@@ -6,6 +6,12 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(BudgetStore.self) private var budgetStore
 
+    /// Theme preference, persisted by ExpensifyApp's @AppStorage. We
+    /// bind to the same key here so the picker change instantly
+    /// re-renders the root view via preferredColorScheme.
+    @AppStorage(ThemePreference.storageKey) private var themeRaw: String =
+        ThemePreference.system.rawValue
+
     /// One row per category. Categories without a backend budget get a
     /// placeholder "not set" Budget so the user can tap in and create one.
     private var allBudgetRows: [Budget] {
@@ -19,6 +25,7 @@ struct SettingsView: View {
 
                 List {
                     profileSection
+                    appearanceSection
                     budgetsSection
                     rulesSection
                     diagnosticsSection
@@ -61,6 +68,52 @@ struct SettingsView: View {
                 Spacer()
             }
             .padding(.vertical, 4)
+        }
+    }
+
+    /// Light/Dark/System override. Default `.system` follows the
+    /// device's appearance setting; the other two force the app
+    /// independent of the OS. Persisted via @AppStorage and applied
+    /// at the root view in ExpensifyApp.
+    private var appearanceSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                Image(systemName: appearanceIcon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppColor.textPrimary)
+                    .frame(width: 24, height: 24)
+                    .background(AppColor.avatarFill)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                Text("theme")
+                    .font(.system(size: 15))
+                    .foregroundStyle(AppColor.textPrimary)
+                Spacer()
+                Picker("", selection: $themeRaw) {
+                    ForEach(ThemePreference.allCases) { pref in
+                        Text(pref.label).tag(pref.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(AppColor.tap)
+            }
+        } header: {
+            Text("appearance")
+                .font(AppFont.sectionLabel)
+                .foregroundStyle(AppColor.textTertiary)
+        } footer: {
+            Text("'system' follows your iphone's light/dark setting. choose light or dark to override.")
+                .font(AppFont.caption)
+                .foregroundStyle(AppColor.textTertiary)
+        }
+    }
+
+    /// SF Symbol that mirrors the active selection — empty circle (system),
+    /// sun (light), or moon (dark).
+    private var appearanceIcon: String {
+        switch ThemePreference(rawValue: themeRaw) ?? .system {
+        case .system: return "circle.lefthalf.filled"
+        case .light:  return "sun.max"
+        case .dark:   return "moon"
         }
     }
 

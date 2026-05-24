@@ -20,6 +20,13 @@ struct ExpensifyApp: App {
     /// the backend. Used to overlay friend names + DPs onto UPI rows.
     @State private var contactsService = ContactsService()
 
+    /// User-controllable theme override. `.system` (default) follows the
+    /// device-level Light/Dark setting; `.light` / `.dark` force the
+    /// app independent of the device. Settings → Appearance writes this
+    /// via @AppStorage, and the root view applies it below.
+    @AppStorage(ThemePreference.storageKey) private var themeRaw: String =
+        ThemePreference.system.rawValue
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -36,10 +43,14 @@ struct ExpensifyApp: App {
                     // builds the in-memory index on subsequent launches.
                     await contactsService.requestAccessAndLoad()
                 }
-                // Follow the system appearance. The AppColor tokens are
-                // dynamic light/dark pairs (Tokens.swift), so the whole
-                // app re-skins automatically when the user flips iOS
-                // appearance in Settings or via Control Center.
+                // Theme override: AppColor tokens already adapt to the
+                // active interface style; preferredColorScheme nudges
+                // SwiftUI into resolving them with a forced light/dark
+                // style when the user wants the app to ignore the
+                // system setting. .system → nil → inherit.
+                .preferredColorScheme(
+                    ThemePreference(rawValue: themeRaw)?.colorScheme
+                )
         }
     }
 }

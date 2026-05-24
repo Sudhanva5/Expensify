@@ -125,7 +125,8 @@ struct CategoryPickerSheet: View {
                         icon: cat.symbolName,
                         title: cat.shortName,
                         subtitle: nil,
-                        accessory: transaction.category == cat ? .checkmark : .none
+                        accessory: transaction.category == cat ? .checkmark : .none,
+                        highlighted: transaction.category == cat
                     )
                 }
                 .buttonStyle(.plain)
@@ -148,7 +149,8 @@ struct CategoryPickerSheet: View {
                     : "person.crop.circle.fill.badge.checkmark",
                 title: pinnedName ?? "pin to contact",
                 subtitle: pinnedName != nil ? "long-press to unpin" : nil,
-                accessory: .chevron
+                accessory: .chevron,
+                highlighted: true
             )
         }
         .buttonStyle(.plain)
@@ -163,6 +165,8 @@ struct CategoryPickerSheet: View {
 
     /// Shared row scaffold — keeps every line in the sheet on the same
     /// grid so the category list and the pin row don't visually drift.
+    /// `highlighted` rows get the accent-blue glyph treatment (used
+    /// for the contact-pin row + the currently-selected category).
     private enum RowAccessory { case none, checkmark, chevron }
 
     @ViewBuilder
@@ -170,12 +174,13 @@ struct CategoryPickerSheet: View {
         icon: String,
         title: String,
         subtitle: String?,
-        accessory: RowAccessory
+        accessory: RowAccessory,
+        highlighted: Bool = false
     ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(AppColor.textPrimary)
+                .foregroundStyle(highlighted ? AppColor.tap : AppColor.textPrimary)
                 .frame(width: 28, height: 28)
                 .background(AppColor.avatarFill)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
