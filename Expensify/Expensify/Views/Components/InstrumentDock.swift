@@ -97,7 +97,12 @@ private struct DockChip: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10) // bumps the chip touch target to ~44pt
-            .background(isSelected ? AppColor.textPrimary : .clear)
+            // Selected chip uses the accent blue background, NOT
+            // textPrimary — textPrimary inverts to near-white in dark
+            // mode, which made the selected "all" chip render as a
+            // bright white blob over the canvas. Accent blue contrasts
+            // against the dock's translucent capsule in both modes.
+            .background(isSelected ? AppColor.tap : .clear)
             .foregroundStyle(isSelected ? .white : AppColor.textPrimary)
             .clipShape(Capsule())
             // contentShape ensures the WHOLE capsule (including padding)
