@@ -147,7 +147,7 @@ struct RuleEditorSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(saving ? "saving…" : "save") { Task { await save() } }
-                        .foregroundStyle(AppColor.textPrimary)
+                        .foregroundStyle(AppColor.tap)
                         .disabled(saving || name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }

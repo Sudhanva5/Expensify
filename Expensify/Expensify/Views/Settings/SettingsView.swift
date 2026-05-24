@@ -34,7 +34,7 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("done") { dismiss() }
-                        .foregroundStyle(AppColor.textPrimary)
+                        .foregroundStyle(AppColor.tap)
                 }
             }
         }

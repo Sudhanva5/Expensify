@@ -63,7 +63,7 @@ struct ManageRulesView: View {
                     } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(AppColor.textPrimary)
+                            .foregroundStyle(AppColor.tap)
                     }
                 }
             }

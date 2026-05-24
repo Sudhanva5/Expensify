@@ -32,7 +32,12 @@ struct ContentView: View {
                 .badge(store.reviewItems.count)
                 .tag(Tab.activity)
         }
-        .tint(AppColor.textPrimary)
+        // Tab bar's selected-tab tint. Using the accent (tap) blue
+        // instead of primary text follows HIG — the selected indicator
+        // should pop as the system accent, not blend with the body
+        // copy. In light mode it's a saturated blue; in dark it's the
+        // lifted brighter blue from AppColor.tap.
+        .tint(AppColor.tap)
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }

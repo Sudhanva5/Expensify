@@ -90,7 +90,7 @@ struct BudgetEditView: View {
                 Button("save") {
                     Task { await save() }
                 }
-                .foregroundStyle(AppColor.textPrimary)
+                .foregroundStyle(AppColor.tap)
                 .disabled(saving)
             }
         }
