@@ -160,11 +160,6 @@ struct CategoryPickerSheet: View {
         }
     }
 
-    /// Same visual language as the category rows above: 28pt rounded-
-    /// square icon, 15pt medium title, optional secondary caption when
-    /// already pinned. Reads as part of the same "edit details" list
-    /// instead of a tacked-on footer.
-    @ViewBuilder
     /// Lets the user override the merchant display name. When the row
     /// has a VPA, the rename bulk-applies to every other transaction
     /// with the same VPA — same propagation flow as claiming a Nearby
@@ -190,6 +185,10 @@ struct CategoryPickerSheet: View {
         .buttonStyle(.plain)
     }
 
+    /// Same visual language as the category rows above: 28pt rounded-
+    /// square icon, 15pt medium title, optional secondary caption when
+    /// already pinned. Reads as part of the same "edit details" list
+    /// instead of a tacked-on footer.
     @ViewBuilder
     private var contactPinRow: some View {
         Button {
