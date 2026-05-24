@@ -78,21 +78,21 @@ enum AppColor {
         dark:  Color(red: 0.345, green: 0.770, blue: 0.530)
     )
 
-    /// Tap-affordance accent. Was a saturated blue; switched to a
-    /// monochrome dark grey (light mode) / light grey (dark mode)
-    /// per the design direction — the app reads calmer without a
-    /// colored accent, and everything that needs to "pop" can do so
-    /// by inverting against the canvas.
+    /// Tap-affordance accent. A saturated blue that signals "interactive"
+    /// at a glance — toolbar buttons, avatar initials, selected category
+    /// icons, the contact-pin glyph, the Maps button background.
     ///
-    /// Used as a foreground tint (toolbar buttons, avatar initials,
-    /// the currently-selected category icon, the contact-pin glyph).
-    /// When used as a BACKGROUND (Maps button, instrument dock
-    /// selected chip), pair with `AppColor.canvas` as the foreground
-    /// so the text stays readable in both modes — never `.white`
-    /// literal.
+    /// Light: a slightly warm, deep cobalt that holds its own against
+    /// the off-white canvas without feeling generic-iOS-blue.
+    /// Dark: lifted brighter blue so it stays legible at AA contrast
+    /// against the near-black canvas.
+    ///
+    /// When used as a BACKGROUND (Maps button, instrument-dock selected
+    /// chip), pair with `AppColor.canvas` as the foreground so the
+    /// text stays readable in both modes — never `.white` literal.
     static let tap = Color.dynamic(
-        light: Color(red: 0.180, green: 0.165, blue: 0.150),
-        dark:  Color(red: 0.900, green: 0.886, blue: 0.860)
+        light: Color(red: 0.280, green: 0.430, blue: 0.880),
+        dark:  Color(red: 0.490, green: 0.620, blue: 0.980)
     )
 }
 
