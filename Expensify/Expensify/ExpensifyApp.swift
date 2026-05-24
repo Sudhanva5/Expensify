@@ -36,12 +36,10 @@ struct ExpensifyApp: App {
                     // builds the in-memory index on subsequent launches.
                     await contactsService.requestAccessAndLoad()
                 }
-                // Force the whole app to light. Per .impeccable.md, this is
-                // a light-only product — money feels calmer in light, and
-                // we haven't designed a dark palette. Without this, iOS
-                // dark-mode settings would leak through (the inset-grouped
-                // form on Settings was the most visible offender).
-                .preferredColorScheme(.light)
+                // Follow the system appearance. The AppColor tokens are
+                // dynamic light/dark pairs (Tokens.swift), so the whole
+                // app re-skins automatically when the user flips iOS
+                // appearance in Settings or via Control Center.
         }
     }
 }
