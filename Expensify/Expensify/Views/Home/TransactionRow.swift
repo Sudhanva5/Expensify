@@ -117,15 +117,30 @@ struct TransactionRow: View {
     }
 
     /// Title row: raw payee from the bank. Plain text. Truncate when long.
-    /// Uses the matched contact name when present AND long enough to be
-    /// useful (>= 3 chars). Single-letter or empty contact names (which
-    /// Contacts can return when a contact only has initials saved) are
-    /// rejected — falling back to the bank's raw name is more informative
-    /// than rendering "I" as a row title.
+    /// Priority order:
+    ///   1. Explicit `merchantNormalized` override — set by user-driven
+    ///      rename or Places resolution. Beats contact match because
+    ///      the user (or the Places resolver) specifically asked for
+    ///      this name. Without this, renaming "RAJESH KUMAR" to
+    ///      "Manju Tea Stall" would get masked the moment ContactsService
+    ///      auto-matched a "Rajesh" in the address book.
+    ///   2. Contact-name overlay (auto-matched or pinned). Only takes
+    ///      effect when there's no explicit normalized name AND the
+    ///      contact name is >= 3 chars (Single-letter contacts return
+    ///      bad titles).
+    ///   3. Bank's `merchantRaw` as the final fallback.
     private var titleText: String {
+        // 1. Explicit override
+        let normalized = transaction.merchantNormalized
+        if !normalized.isEmpty,
+           normalized.caseInsensitiveCompare(transaction.merchantRaw) != .orderedSame {
+            return normalized
+        }
+        // 2. Contact-name overlay
         if let cn = effectiveContactName, !cn.isEmpty {
             return cn
         }
+        // 3. Bank text
         return transaction.merchantRaw.isEmpty
             ? transaction.displayMerchant
             : transaction.merchantRaw
