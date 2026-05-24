@@ -36,6 +36,14 @@ struct TransactionRow: View {
             MerchantAvatar(
                 merchantName: transaction.displayMerchant,
                 size: 44,
+                // Favicon resolves from the BANK's underlying signal —
+                // raw payee text, VPA — not the renameable display
+                // name. Otherwise renaming a row to "Manju Tea Stall"
+                // would chase a Manju favicon that doesn't exist,
+                // dropping the actually-stable Paytm-QR / brand logo.
+                brandKey: transaction.merchantRaw.isEmpty
+                    ? transaction.vpa ?? ""
+                    : transaction.merchantRaw,
                 contactImageData: contactImageData,
                 contactName: effectiveContactName,
                 // Falls back to the category SF Symbol when there's no

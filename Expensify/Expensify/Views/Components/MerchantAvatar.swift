@@ -10,6 +10,14 @@ import SwiftUI
 struct MerchantAvatar: View {
     let merchantName: String
     var size: CGFloat = 44
+    /// Stable identifier used for favicon lookup, independent of the
+    /// renameable display name. When the user renames a row's title,
+    /// the favicon should still resolve from the bank's underlying
+    /// merchant text or VPA — the brand identity is fixed at the bank
+    /// side, the title is just the user's preferred label. Pass
+    /// `merchantRaw` or the VPA here. When nil, falls back to
+    /// `merchantName` (preserves preview / one-arg call sites).
+    var brandKey: String? = nil
     /// Optional contact photo data. When supplied, takes priority over
     /// favicons + initials — the user's friend's actual DP fills the
     /// circle. Sourced from `ContactsService.imageData(for:)`.
@@ -31,7 +39,12 @@ struct MerchantAvatar: View {
         // When a contact name is supplied, the avatar is representing a
         // person, not a merchant — no favicon lookup.
         if let contactName, !contactName.isEmpty { return nil }
-        return MerchantBranding.faviconURL(for: merchantName, size: 128)
+        // Resolve from the stable brand key (bank's merchantRaw / VPA),
+        // NOT the renameable display name. The user may have flipped
+        // the row title to "Manju Tea Stall" but the bank text is still
+        // "PAYTMQR6FGL36" — favicon should track that underlying signal.
+        let key = brandKey?.isEmpty == false ? brandKey! : merchantName
+        return MerchantBranding.faviconURL(for: key, size: 128)
     }
 
     private var initials: String {

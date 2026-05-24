@@ -91,7 +91,15 @@ struct SwipeCardView: View {
     private var cardContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 14) {
-                MerchantAvatar(merchantName: item.transaction.displayMerchant, size: 56)
+                MerchantAvatar(
+                    merchantName: item.transaction.displayMerchant,
+                    size: 56,
+                    // Stable favicon source — bank's raw text, not the
+                    // renameable display name.
+                    brandKey: item.transaction.merchantRaw.isEmpty
+                        ? item.transaction.vpa ?? ""
+                        : item.transaction.merchantRaw
+                )
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.transaction.displayMerchant)

@@ -93,6 +93,11 @@ struct TransactionDetailSheet: View {
             MerchantAvatar(
                 merchantName: primaryTitle,
                 size: 44,
+                // Stable brand key from the bank's text, not the
+                // renameable title — see MerchantAvatar.brandKey.
+                brandKey: transaction.merchantRaw.isEmpty
+                    ? transaction.vpa ?? ""
+                    : transaction.merchantRaw,
                 contactImageData: contactImageData,
                 contactName: contactName,
                 categoryFallback: transaction.category
