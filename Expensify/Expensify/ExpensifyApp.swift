@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 @main
 struct ExpensifyApp: App {
@@ -26,6 +27,35 @@ struct ExpensifyApp: App {
     /// via @AppStorage, and the root view applies it below.
     @AppStorage(ThemePreference.storageKey) private var themeRaw: String =
         ThemePreference.system.rawValue
+
+    init() {
+        // SwiftUI's `.tint(AppColor.tap)` on TabView SHOULD color the
+        // selected tab — and in iOS 17 / earlier 18 it does. But the
+        // updated iOS 18 / 26 tab-bar implementation occasionally
+        // ignores SwiftUI tint when the underlying UITabBar uses the
+        // default appearance (selected items fall back to system
+        // label, which renders white in dark mode — exactly the
+        // "tab selector is white" report).
+        //
+        // Belt-and-suspenders: set the UITabBarItem appearance proxy
+        // explicitly. Wrapping the SwiftUI Color in `UIColor(_:)`
+        // preserves its dynamic light/dark provider, so this single
+        // call colors the selected icon AND label correctly in both
+        // appearances.
+        let tintUIColor = UIColor(AppColor.tap)
+        let tabAppearance = UITabBarAppearance()
+        tabAppearance.configureWithDefaultBackground()
+        for layout in [
+            tabAppearance.stackedLayoutAppearance,
+            tabAppearance.inlineLayoutAppearance,
+            tabAppearance.compactInlineLayoutAppearance,
+        ] {
+            layout.selected.iconColor = tintUIColor
+            layout.selected.titleTextAttributes = [.foregroundColor: tintUIColor]
+        }
+        UITabBar.appearance().standardAppearance = tabAppearance
+        UITabBar.appearance().scrollEdgeAppearance = tabAppearance
+    }
 
     var body: some Scene {
         WindowGroup {

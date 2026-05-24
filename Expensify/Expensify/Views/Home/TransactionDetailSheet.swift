@@ -175,7 +175,11 @@ struct TransactionDetailSheet: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
-            .background(AppColor.textPrimary)
+            // Accent blue, NOT textPrimary — in dark mode textPrimary
+            // resolves to near-white, which made the white text vanish
+            // into a white block. Accent blue is the standard call-to-
+            // action background in both modes.
+            .background(AppColor.tap)
             .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
