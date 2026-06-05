@@ -249,13 +249,14 @@ export async function processGmailMessage(
     }
   }
 
-  // iOS-side `needsLocation` mirrors the same logic — outflow, not autopay,
-  // not an online merchant, not alias-resolved.
+  // iOS-side `needsLocation` mirrors upsertTransaction's locationStatus
+  // rule — outflow, not autopay, not an online merchant. (The
+  // alias-resolved opt-out was removed; we now ask for GPS on every
+  // in-person spend regardless of how confidently we know the merchant.)
   const needsLocation =
     !parseResult.data.isAutopay &&
     parseResult.data.direction === 'out' &&
-    !onlineCheck.isOnline &&
-    !aliasResolved;
+    !onlineCheck.isOnline;
 
   if (onlineCheck.isOnline) {
     console.log(
