@@ -369,6 +369,65 @@ export function extractRedbus(plainText: string): ExtractedReceipt {
   return result;
 }
 
+// === MakeMyTrip / Goibibo / Cleartrip parser ===========================
+
+/**
+ * MakeMyTrip family (MMT, Goibibo, Cleartrip) booking-confirmation
+ * emails. These embed multiple INR amounts in the body and the order
+ * isn't reliably "price first" — savings / discount / coupon lines
+ * often appear ABOVE the actual price. Example from real email:
+ *
+ *   "Congrats! You have saved INR 1457 on this property as early bird"
+ *   "INR 1,065"
+ *   "Congratulations! You saved INR 395 by booking with MakeMyTrip"
+ *
+ * The universal extractor grabs ₹1457 (the savings) and tries to bind
+ * a ₹1065 card debit to it — binder rejects (amount mismatch), receipt
+ * stays unbound, iOS detail sheet shows no receipt.
+ *
+ * Strategy: tokenize "INR <amount>" / "Rs <amount>" matches across the
+ * body, skip ones whose ±40-char neighborhood contains savings-shaped
+ * words (saved, save, discount, coupon, cashback, offer, off), then
+ * pick the LARGEST surviving value — booking totals are typically the
+ * biggest single number in the body (above per-night, taxes, fees).
+ */
+export function extractMakeMyTrip(plainText: string): ExtractedReceipt {
+  const result: ExtractedReceipt = {
+    amountInrMinor: null,
+    orderId: null,
+    items: [],
+    fees: [],
+    meta: {},
+    parserVersion: 'mmt.v1',
+  };
+
+  // Booking / PNR ids the body uses ("Booking ID: NF1234567890123").
+  const idM = plainText.match(/(?:Booking|PNR|Reference)\s*(?:ID|No\.?)?\s*[:\-]?\s*([A-Z0-9]{8,})/i);
+  if (idM?.[1]) result.orderId = idM[1];
+
+  const SAVINGS_RE = /\b(saved?|saving|discount|coupon|cashback|reward|offer|off)\b/i;
+  const amountRe = /(?:INR|Rs\.?|₹)\s*([0-9][0-9,]*(?:\.\d{1,2})?)/gi;
+
+  const candidates: number[] = [];
+  for (const m of plainText.matchAll(amountRe)) {
+    const idx = m.index ?? 0;
+    const start = Math.max(0, idx - 40);
+    const window = plainText.slice(start, idx + (m[0]?.length ?? 0) + 40);
+    if (SAVINGS_RE.test(window)) continue;
+    const n = Number((m[1] ?? '').replace(/,/g, ''));
+    if (Number.isFinite(n) && n > 0) candidates.push(n);
+  }
+  if (candidates.length > 0) {
+    const best = Math.max(...candidates);
+    result.amountInrMinor = BigInt(Math.round(best * 100));
+  }
+
+  if (result.amountInrMinor === null && !result.orderId) {
+    return extractUniversal(plainText);
+  }
+  return result;
+}
+
 // === Sender → extractor router =========================================
 
 /**
@@ -410,7 +469,7 @@ export function pickExtractor(fromAddress: string): {
     return { source: 'cab', extract: extractUniversal };
   }
   if (addr.includes('makemytrip.') || addr.includes('goibibo.') || addr.includes('cleartrip.')) {
-    return { source: 'travel', extract: extractUniversal };
+    return { source: 'travel', extract: extractMakeMyTrip };
   }
   if (addr.includes('redbus.') || addr.includes('@redbus')) {
     return { source: 'redbus', extract: extractRedbus };

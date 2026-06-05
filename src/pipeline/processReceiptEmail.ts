@@ -32,8 +32,15 @@ export type ReceiptOutcome =
       matchReason: 'amount_and_window' | 'amount_only' | 'no_match' | 'source_merchant_mismatch';
     };
 
-/** ±30 minute matching window between receipt arrival and HDFC transaction. */
-const MATCH_WINDOW_MS = 30 * 60 * 1000;
+/** Time window between the receipt arrival and the HDFC card-debit
+ *  alert. Was ±30 min originally but real-world delays push past that:
+ *  Swiggy delivery emails arrive 25-40 min AFTER the bank debit, RedBus
+ *  sends the ticket and the tax-invoice ~10 min apart. ±90 min absorbs
+ *  the long tail without pulling in unrelated same-amount debits — the
+ *  binder still requires source ↔ merchant alignment AND the non-P2P
+ *  guard regardless of how wide this window is.
+ */
+const MATCH_WINDOW_MS = 90 * 60 * 1000;
 
 export async function processReceiptEmail(msg: ExtractedMessage): Promise<ReceiptOutcome> {
   if (!isReceiptSender(msg.fromAddress)) {
