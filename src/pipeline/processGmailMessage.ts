@@ -208,14 +208,14 @@ export async function processGmailMessage(
 
   // Decide whether this row should ever receive a location update. We
   // compute it BEFORE the insert so the DB row is born with the right
-  // locationStatus and iOS doesn't try to backfill it later. Three
-  // skip-conditions: online-looking merchants (.com / payment-aggregator
-  // prefix), alias-resolved merchants (we already know what they are),
-  // and the existing autopay + inbound paths handled inside upsert.
+  // locationStatus and iOS doesn't try to backfill it later. The only
+  // skip-condition we evaluate here is the online-merchant detector
+  // (.com / payment-aggregator prefix) — autopay + inbound paths are
+  // handled inside upsert. Alias-resolved merchants USED to be
+  // skipped too, but every in-person spend benefits from the GPS
+  // ping (which Swiggy outlet, which Uber pickup) so that opt-out
+  // was removed.
   const onlineCheck = detectOnlineMerchant(parseResult.data.merchantRaw);
-  const aliasResolved =
-    categorization.picked?.source === 'alias' ||
-    categorization.picked?.source === 'autopay_alias';
 
   const upsert = await upsertTransaction({
     parsed: parseResult.data,
@@ -224,7 +224,6 @@ export async function processGmailMessage(
     rawSubject: msg.subject,
     rawSnippet: msg.snippet || msg.body.slice(0, 200),
     isOnlineMerchant: onlineCheck.isOnline,
-    isAliasResolved: aliasResolved,
   });
 
   if (!upsert.created) {

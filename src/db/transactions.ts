@@ -16,10 +16,6 @@ export interface InsertTransactionInput {
   /// (Namecheap, Anthropic, etc.) where iPhone GPS is meaningless and
   /// would otherwise let iOS try to backfill location for the row.
   isOnlineMerchant?: boolean;
-  /// If true, the categorization came from an alias hit and we're already
-  /// confident — no need to ask the phone for location. Same semantic
-  /// effect as isOnlineMerchant: locationStatus becomes 'not_applicable'.
-  isAliasResolved?: boolean;
 }
 
 // Returns { id, created } — created=false means we hit the idempotency guard.
@@ -36,11 +32,22 @@ export async function upsertTransaction(
   const status =
     categorization.status === 'auto_resolved' ? 'resolved' : 'pending_review';
 
+  // GPS is meaningful for ANY in-person spend. We only opt out when
+  // the row is structurally without a physical context:
+  //   • autopay (subscription bill — billed in the cloud)
+  //   • inflow (somebody paid you — you weren't necessarily anywhere)
+  //   • online merchant (Namecheap, Anthropic, etc.)
+  //
+  // Alias-resolved merchants USED TO opt out too ("we already know
+  // this is Swiggy, no need to ask the phone"), but that suppressed
+  // useful context — which Swiggy outlet, which Uber pickup point,
+  // which MakeMyTrip booking from where. Now alias-resolved rows
+  // still go through the GPS round-trip; the user gets the physical
+  // location attached to every real-world spend.
   const locationStatus =
     parsed.isAutopay ||
     parsed.direction === 'in' ||
-    input.isOnlineMerchant ||
-    input.isAliasResolved
+    input.isOnlineMerchant
       ? 'not_applicable'
       : 'awaiting';
 
