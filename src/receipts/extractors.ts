@@ -341,7 +341,19 @@ export function extractRedbus(plainText: string): ExtractedReceipt {
   const ticketM = plainText.match(/Ticket\s+Number\s*:\s*([A-Z0-9]+)/i);
   if (ticketM?.[1]) result.orderId = ticketM[1];
 
-  const grossM = plainText.match(/Ticket\s+Price[^₹\d\n]{0,40}(?:Rs\.?|₹)\s*([0-9][0-9,.]*)/i);
+  // The "Ticket Price" label and the "Rs. <amount>" line sit on
+  // SEPARATE rendered lines in real redBus emails:
+  //     Ticket Price
+  //     Rs. 3912.48
+  //     (inclusive of GST)
+  // The old regex used `[^₹\d\n]{0,40}` which explicitly excluded
+  // newlines, so it only matched on the rare layout where both
+  // landed on one line. Switching to `[\s:.()\-,]{0,60}?` allows
+  // whitespace + common label punctuation across line breaks
+  // without over-matching (still bounded to 60 chars, non-greedy).
+  const grossM = plainText.match(
+    /Ticket\s+Price[\s:.()\-,]{0,60}?(?:Rs\.?|₹)\s*([0-9][0-9,.]*)/i,
+  );
   const savedM = plainText.match(/You\s+have\s+saved\s+Rs[.\s]*([0-9][0-9,.]*)/i);
   if (grossM?.[1]) {
     const gross = Number(grossM[1].replace(/,/g, ''));
