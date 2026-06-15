@@ -5,7 +5,7 @@
     "buildCommand": "echo 'No build step — running TypeScript via tsx in production'"
   },
   "deploy": {
-    "startCommand": "npm start",
+    "startCommand": "bash scripts/start-dispatcher.sh",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 120,
     "restartPolicyType": "ON_FAILURE",

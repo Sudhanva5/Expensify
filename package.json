@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "tsx src/server.ts",
+    "start:mcp": "tsx src/mcp/server.ts",
     "test": "vitest",
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit",
@@ -23,6 +24,7 @@
   },
   "dependencies": {
     "@fastify/sensible": "^6.0.4",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@parse/node-apn": "^8.1.0",
     "@prisma/client": "^6.19.3",
     "fastify": "^5.8.5",
