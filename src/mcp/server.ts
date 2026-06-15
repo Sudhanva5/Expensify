@@ -34,6 +34,7 @@ import { registerSpendTools } from './handlers/spend.js';
 import { registerBudgetTools } from './handlers/budgets.js';
 import { registerRuleTools } from './handlers/rules.js';
 import { registerDebugTools } from './handlers/debug.js';
+import { registerDetailTools } from './handlers/details.js';
 import { oauthRoutes } from './oauth/routes.js';
 import { lookupActiveToken } from './oauth/store.js';
 
@@ -56,6 +57,7 @@ function buildMcpServer(): McpServer {
   registerBudgetTools(server);
   registerRuleTools(server);
   registerDebugTools(server);
+  registerDetailTools(server);
 
   return server;
 }

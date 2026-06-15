@@ -13,6 +13,19 @@ import {
   endOfIstDay,
   monthBounds,
 } from '../formatters.js';
+import {
+  INCLUDE_VALUES,
+  expandTransaction,
+  prismaIncludeFor,
+  type Include,
+} from '../expand.js';
+
+const IncludeArg = z
+  .array(z.enum(INCLUDE_VALUES))
+  .optional()
+  .describe(
+    'Optional richer fields to embed on each transaction. Choose any subset of "receipt" (Swiggy/MMT/etc. line items), "places" (nearby-Places suggestions JSON), "location" (lat/lng/status), "fx" (source currency + bank rate + markup), "email" (raw HDFC subject + snippet). Omit for the lightweight shape.',
+  );
 
 export function registerSpendTools(server: McpServer): void {
   server.registerTool(
@@ -53,6 +66,7 @@ export function registerSpendTools(server: McpServer): void {
           .enum(['awaiting_location', 'pending_review', 'resolved'])
           .optional(),
         limit: z.number().int().min(1).max(100).default(25),
+        include: IncludeArg,
       },
     },
     async (args) => {
@@ -85,34 +99,19 @@ export function registerSpendTools(server: McpServer): void {
         where.occurredAt = occurred;
       }
 
+      const includes = new Set<Include>(args.include ?? []);
       const rows = await prisma.transaction.findMany({
         where,
         orderBy: { occurredAt: 'desc' },
         take: args.limit,
-        include: { category: { select: { name: true } } },
+        include: prismaIncludeFor(includes),
       });
 
       return {
         content: [
           asJsonText({
             count: rows.length,
-            transactions: rows.map((r) => ({
-              id: r.id,
-              occurredAt: r.occurredAt.toISOString(),
-              amountInr: minorToInr(r.amountInrMinor),
-              currency: r.currency,
-              direction: r.direction,
-              instrument: r.instrument,
-              merchant: r.merchantNormalized || r.merchantRaw,
-              merchantRaw: r.merchantRaw,
-              vpa: r.vpa,
-              category: r.category?.name ?? null,
-              confidence: r.confidence ? Number(r.confidence) : null,
-              signalSource: r.signalSource,
-              status: r.status,
-              locationStatus: r.locationStatus,
-              template: r.emailTemplate,
-            })),
+            transactions: rows.map((r) => expandTransaction(r, includes)),
           }),
         ],
       };
@@ -298,10 +297,12 @@ export function registerSpendTools(server: McpServer): void {
       inputSchema: {
         query: z.string().min(1).describe('Substring to look for.'),
         limit: z.number().int().min(1).max(50).default(20),
+        include: IncludeArg,
       },
     },
     async (args) => {
       const q = args.query;
+      const includes = new Set<Include>(args.include ?? []);
       const rows = await prisma.transaction.findMany({
         where: {
           OR: [
@@ -312,23 +313,14 @@ export function registerSpendTools(server: McpServer): void {
         },
         orderBy: { occurredAt: 'desc' },
         take: args.limit,
-        include: { category: { select: { name: true } } },
+        include: prismaIncludeFor(includes),
       });
       return {
         content: [
           asJsonText({
             query: q,
             count: rows.length,
-            transactions: rows.map((r) => ({
-              id: r.id,
-              occurredAt: r.occurredAt.toISOString(),
-              amountInr: minorToInr(r.amountInrMinor),
-              direction: r.direction,
-              merchant: r.merchantNormalized || r.merchantRaw,
-              merchantRaw: r.merchantRaw,
-              vpa: r.vpa,
-              category: r.category?.name ?? null,
-            })),
+            transactions: rows.map((r) => expandTransaction(r, includes)),
           }),
         ],
       };

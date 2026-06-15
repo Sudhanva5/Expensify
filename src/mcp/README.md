@@ -6,11 +6,16 @@ Remote MCP server that exposes the Expense Solver Postgres database to Claude (D
 
 | Bucket | Tool | Purpose |
 |---|---|---|
-| Spend | `list_transactions` | filtered list, newest first |
+| Spend | `list_transactions` | filtered list, newest first; optional `include` for rich blocks |
 | Spend | `monthly_summary` | per-category breakdown for one IST month |
 | Spend | `top_merchants` | top N merchants by outflow over a range |
 | Spend | `total_by_category` | per-category totals over a range |
-| Spend | `search_merchant` | fuzzy search merchantNormalized + merchantRaw + vpa |
+| Spend | `search_merchant` | fuzzy search merchantNormalized + merchantRaw + vpa; optional `include` |
+| Detail | `get_transaction` | single row with all joins: receipts, places, location, fx, email |
+| Detail | `recent_receipts` | Swiggy / MMT / redBus receipts with full items + fees + meta |
+| Detail | `list_instruments` | distinct accounts + cards seen, with usage counts |
+| Detail | `list_tags` | user-created tags + usage counts |
+| Detail | `list_goals` | savings goals — name, target, deadline |
 | Budgets | `current_budget_status` | MTD spend vs limit, fired thresholds |
 | Budgets | `budget_history` | historical threshold firings |
 | Rules | `list_user_rules` | rules + JSONB conditions, priority order |
@@ -21,6 +26,12 @@ Remote MCP server that exposes the Expense Solver Postgres database to Claude (D
 | Debug | `recent_email_messages` | every Gmail message the pipeline touched |
 
 All amounts surfaced as INR rupees. All dates IST (Asia/Kolkata). BigInt minor units → Number rupees at the tool boundary.
+
+### The `include` flag
+
+`list_transactions` and `search_merchant` take an optional `include: [...]` array — pass any subset of `"receipt"`, `"places"`, `"location"`, `"fx"`, `"email"` to embed those richer blocks on every transaction in the response. Skip the flag for the lightweight default shape.
+
+`get_transaction(id)` always returns every block — it's the drill-down path after a list/search has surfaced a row of interest.
 
 ## Run locally
 
