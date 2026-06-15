@@ -2,6 +2,10 @@ import Foundation
 
 /// User-selectable date scope for the Home and Categories tabs.
 enum DateRange: Hashable {
+    /// No date filter — every transaction the store has loaded shows up.
+    /// The home list groups them into month sections regardless of scope,
+    /// so `.all` reads as a continuous timeline of every spend.
+    case all
     case day(Date)
     case month(year: Int, month: Int)
     case custom(start: Date, end: Date)
@@ -16,6 +20,8 @@ enum DateRange: Hashable {
     var label: String {
         let df = DateFormatter()
         switch self {
+        case .all:
+            return "all transactions"
         case .day(let date):
             df.dateFormat = "d MMM yyyy"
             return df.string(from: date)
@@ -33,6 +39,8 @@ enum DateRange: Hashable {
     func contains(_ date: Date) -> Bool {
         let cal = Calendar.current
         switch self {
+        case .all:
+            return true
         case .day(let day):
             return cal.isDate(date, inSameDayAs: day)
         case .month(let year, let month):

@@ -128,7 +128,7 @@ struct HomeView: View {
                 }
             } else {
                 // Group filtered transactions by month for the section label
-                ForEach(monthSections(), id: \.label) { section in
+                ForEach(monthSections()) { section in
                     Section {
                         ForEach(section.transactions) { tx in
                             rowFor(tx)
@@ -153,13 +153,11 @@ struct HomeView: View {
                                 }
                         }
                     } header: {
-                        Text(section.label)
-                            .font(AppFont.sectionLabel)
-                            .foregroundStyle(AppColor.textTertiary)
-                            .padding(.top, 8)
-                            .padding(.bottom, 4)
+                        monthSectionHeader(section)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 20)
+                            .padding(.top, 14)
+                            .padding(.bottom, 8)
                             .listRowInsets(EdgeInsets())
                     }
                 }
@@ -190,27 +188,78 @@ struct HomeView: View {
     }
 
     private struct MonthSection: Identifiable {
-        let label: String
+        /// Sort key — first-day-of-month timestamp for the bucket.
+        let monthStart: Date
+        let year: Int          // e.g. 2026
+        let monthName: String  // e.g. "June"
         let transactions: [Transaction]
-        var id: String { label }
+        /// Sum of outflow amounts for the month, in rupees. Inflows are
+        /// EXCLUDED — the header is communicating "how much money left
+        /// my account this month", not net cash position.
+        let totalOutflow: Decimal
+        var id: Date { monthStart }
     }
 
     private func monthSections() -> [MonthSection] {
         let cal = Calendar.current
-        let groups = Dictionary(grouping: filtered) { tx -> String in
+        // Group by (year, month) keyed on the first-of-month Date — Date
+        // is Hashable and sorts naturally, so we don't need a string key.
+        let groups = Dictionary(grouping: filtered) { tx -> Date in
             let comps = cal.dateComponents([.year, .month], from: tx.occurredAt)
-            let date = cal.date(from: comps) ?? tx.occurredAt
-            let df = DateFormatter()
-            df.dateFormat = "MMMM yyyy"
-            return df.string(from: date).uppercased()
+            return cal.date(from: comps) ?? tx.occurredAt
         }
+        let monthDF = DateFormatter()
+        monthDF.dateFormat = "MMMM"
         return groups
-            .map { MonthSection(label: $0.key, transactions: $0.value) }
-            .sorted { lhs, rhs in
-                guard let l = lhs.transactions.first?.occurredAt,
-                      let r = rhs.transactions.first?.occurredAt else { return false }
-                return l > r
+            .map { (monthStart, txs) -> MonthSection in
+                let comps = cal.dateComponents([.year, .month], from: monthStart)
+                let outflow = txs
+                    .filter { $0.direction == .out }
+                    .reduce(Decimal(0)) { $0 + $1.amountInr }
+                return MonthSection(
+                    monthStart: monthStart,
+                    year: comps.year ?? 0,
+                    monthName: monthDF.string(from: monthStart),
+                    transactions: txs.sorted { $0.occurredAt > $1.occurredAt },
+                    totalOutflow: outflow
+                )
             }
+            .sorted { $0.monthStart > $1.monthStart }
+    }
+
+    /// Rich month header. Year reads as a small caption above the month
+    /// name; total outflow for that month is right-aligned on the same
+    /// baseline as the month name. Reads as:
+    ///
+    ///   2026
+    ///   June                                    ₹9,560
+    @ViewBuilder
+    private func monthSectionHeader(_ section: MonthSection) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(verbatim: String(section.year))
+                .font(.system(size: 11, weight: .semibold).smallCaps())
+                .foregroundStyle(AppColor.textTertiary)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(section.monthName.lowercased())
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(AppColor.textPrimary)
+                Spacer(minLength: 8)
+                Text(formatRupees(section.totalOutflow))
+                    .font(.system(size: 16, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(AppColor.textPrimary)
+            }
+        }
+    }
+
+    /// "₹9,560" formatter. Uses Indian-grouping (lakh/crore) and drops
+    /// trailing zeros — round amounts read cleaner without ".00".
+    private func formatRupees(_ amount: Decimal) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.locale = Locale(identifier: "en_IN")
+        f.maximumFractionDigits = 0
+        let n = NSDecimalNumber(decimal: amount)
+        return "₹" + (f.string(from: n) ?? "\(amount)")
     }
 
     private var greeting: String {

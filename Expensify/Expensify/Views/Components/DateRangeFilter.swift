@@ -17,6 +17,9 @@ struct DateRangeFilter: View {
 
     var body: some View {
         Menu {
+            Button("All transactions") {
+                range = .all
+            }
             Button("Day") {
                 workingDay = currentDayCandidate()
                 showingDayPicker = true
