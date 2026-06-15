@@ -242,28 +242,26 @@ struct HomeView: View {
     ///   June                                    ₹9,560
     @ViewBuilder
     private func monthSectionHeader(_ section: MonthSection) -> some View {
+        // No bottom hairline rule — iOS pins List section headers at the
+        // top during scroll, and a separator line at the bottom of the
+        // sticky header reads as a cut-off section instead of a clean
+        // header. Spacing below the title carries the visual stop on
+        // its own.
         VStack(alignment: .leading, spacing: 2) {
             Text(verbatim: String(section.year))
                 .font(.system(size: 11, weight: .semibold).smallCaps())
                 .foregroundStyle(AppColor.textTertiary)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(section.monthName.lowercased())
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(AppColor.textPrimary)
                 Spacer(minLength: 8)
                 Text(formatRupees(section.totalOutflow))
-                    .font(.system(size: 19, weight: .semibold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 18, weight: .semibold, design: .rounded).monospacedDigit())
                     .foregroundStyle(AppColor.textPrimary)
             }
-            // Hairline rule under the title block — separates each month
-            // bucket as the user scrolls "all transactions" so the
-            // year+month+total reads as one self-contained header,
-            // not as another row in the list.
-            Rectangle()
-                .fill(AppColor.hairline)
-                .frame(height: 0.5)
-                .padding(.top, 6)
         }
+        .padding(.bottom, 4)
     }
 
     /// "₹9,560" formatter. Uses Indian-grouping (lakh/crore) and drops

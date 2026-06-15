@@ -116,12 +116,23 @@ struct TransactionRow: View {
         }
     }
 
-    /// True when this row is rendering as a contact-overlay P2P. Used to
-    /// suppress the Places chip and override the category label. Uses the
-    /// length-guarded contact name so single-letter matches don't trigger
-    /// a P2P override on an otherwise-valid merchant row.
+    /// True when the row is rendering as a contact-overlay P2P.
+    /// Two gates — both must hold:
+    ///   1. We have a length-valid contact name (≥3 chars), AND
+    ///   2. The row's own category is unset OR explicitly the P2P
+    ///      category. If the user has retagged this row to Travel /
+    ///      Food / etc., the contact identity is no longer the
+    ///      meaningful frame for the row — the user's tag wins, the
+    ///      title falls back to the merchant text, and the category
+    ///      label reads whatever they chose.
+    ///
+    /// Without (2), retagging a Rapido driver's personal-VPA debit to
+    /// Travel would still display the matched contact's name and a
+    /// hard-coded "p2p" subtitle.
     private var isContactOverride: Bool {
-        effectiveContactName != nil
+        guard effectiveContactName != nil else { return false }
+        let cat = transaction.category
+        return cat == nil || cat == .personalTransfer
     }
 
     /// Title row: raw payee from the bank. Plain text. Truncate when long.
