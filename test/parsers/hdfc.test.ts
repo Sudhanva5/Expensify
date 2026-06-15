@@ -237,10 +237,34 @@ describe('HDFC parser — Template E v2: RuPay CC UPI debit (May 2026 format)', 
     expect(result.data.instrument).toBe('card_2668');
     expect(result.data.amountMinor).toBe(127500n); // ₹1275.00
     expect(result.data.vpa).toBe('paytm.d91908873@pty');
-    // No payee name in this format — parser falls back to the VPA's local-part.
+    // Payment-channel code "(TRC - QSR)" is NOT a name — hyphen flags it
+    // as a channel code, parser falls back to the VPA's local-part.
     expect(result.data.merchantRaw).toBe('paytm.d91908873');
     expect(result.data.externalRef).toBe('184567890123');
     expect(result.data.isAutopay).toBe(false);
+  });
+
+  it('keeps a real payee name from the parenthetical (SHANTHAMMA SM)', () => {
+    // Regression: the parser used to strip the parens unconditionally,
+    // even when they contained a real name like "(SHANTHAMMA SM)" —
+    // merchantRaw would fall back to the VPA local-part "gpay-…".
+    // Heuristic now keeps letters-only paren content and only rejects
+    // codes that carry hyphens / slashes / digits ("TRC - QSR").
+    const result = parseHdfcEmail({
+      subject: 'You have done a UPI txn. Check details!',
+      body: loadFixture('cc-upi-debit-v2-shanthamma.txt'),
+      receivedAt: new Date('2026-06-11T11:56:42Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.template).toBe('cc_upi_debit_v2');
+    expect(result.data.amountMinor).toBe(5800n); // ₹58.00
+    expect(result.data.instrument).toBe('card_2668');
+    expect(result.data.vpa).toBe('gpay-11263875094@okbizaxis');
+    expect(result.data.merchantRaw).toBe('SHANTHAMMA SM');
+    expect(result.data.externalRef).toBe('124572540800');
   });
 });
 

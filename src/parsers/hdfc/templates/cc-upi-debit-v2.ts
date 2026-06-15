@@ -18,11 +18,18 @@
 //   • "to <vpa> <name>"  → "and credited to VPA <vpa> [(code)]"
 //   • date "DD-MM-YY"    → "DD Mon, YYYY" (no time field)
 //
-// Merchant name caveat: the new format DROPS the payee's name in
-// favour of a payment-channel code like "(TRC - QSR)". We fall back to
-// the VPA's local-part for merchantRaw so the row isn't blank in the
-// UI; the user can claim a Places suggestion or pin a contact from
-// there. VpaPattern memory still kicks in once tagged once.
+// Merchant name caveat: the parenthetical after the VPA carries one of
+// two distinct things:
+//   • a real payee name — "(SHANTHAMMA SM)", "(BIG BAZAAR LTD)" — when
+//     paying a person or named merchant
+//   • a payment-channel code — "(TRC - QSR)", "(QR - F&B)" — when paying
+//     a paytm-QR / GPay-QR-style merchant where the bank doesn't have
+//     the storefront name
+// Distinguishing them by content: real names are letters + spaces (with
+// optional apostrophes / periods / ampersands); channel codes carry
+// hyphens, slashes, or digits. When the paren content fails the
+// "looks like a name" check we fall back to the VPA's local-part so
+// the row isn't blank; user can rename or claim a Places suggestion.
 
 import { parseMinorUnits, parseDdMonYyyy } from '../dateMoney.js';
 import type { HdfcEmailInput, ParseResult, TemplateParser } from '../types.js';
@@ -50,15 +57,19 @@ export const tryParse: TemplateParser = (input: HdfcEmailInput): ParseResult | n
   const refM = /UPI[^\d]*(\d{10,})/i.exec(input.body);
   const amount = parseMinorUnits(m[1]!);
   const vpa = m[3]!.trim();
-  // Optional inline payee. New format usually has a parenthetical code
-  // like "(TRC - QSR)" which is NOT a merchant name — strip it. If we
-  // see a real-looking name (letters + spaces), keep it.
+  // Prefer the parenthetical (real payee name); fall back to the bare
+  // trailing text; fall back finally to the VPA's local-part. Each
+  // candidate runs through looksLikePayeeName(), which rejects
+  // payment-channel codes like "TRC - QSR" without giving up real names
+  // like "SHANTHAMMA SM".
   const trailing = m[4]!.trim();
-  const trailingWithoutParens = trailing.replace(/^\(.*?\)\s*/, '').trim();
-  const looksLikeName = /^[A-Za-z][A-Za-z\s.&'/-]{2,}$/.test(trailingWithoutParens);
-  const merchantRaw = looksLikeName
-    ? trailingWithoutParens
-    : (vpa.split('@')[0] ?? vpa);
+  const parenContent = /^\(([^)]+)\)/.exec(trailing)?.[1]?.trim();
+  const bareTrailing = trailing.startsWith('(') ? undefined : trailing;
+  const nameCandidate =
+    (parenContent && looksLikePayeeName(parenContent) && parenContent) ||
+    (bareTrailing && looksLikePayeeName(bareTrailing) && bareTrailing) ||
+    null;
+  const merchantRaw = nameCandidate ?? vpa.split('@')[0] ?? vpa;
 
   return {
     ok: true,
@@ -79,3 +90,13 @@ export const tryParse: TemplateParser = (input: HdfcEmailInput): ParseResult | n
     },
   };
 };
+
+/// True when the string is plausibly a human/business name rather than a
+/// payment-channel code. Letters + the punctuation real names carry
+/// (space, period, apostrophe, ampersand) only — hyphens, slashes, and
+/// digits flag the value as a code like "TRC - QSR" or "QR - F&B".
+function looksLikePayeeName(s: string): boolean {
+  const t = s.trim();
+  if (t.length < 3) return false;
+  return /^[A-Za-z][A-Za-z\s.'&]+$/.test(t);
+}
