@@ -31,6 +31,11 @@ struct Transaction: Identifiable, Hashable {
     /// auto-tag — iOS shows them as a "Nearby places" picker so the
     /// user can claim the right one with one tap.
     var placesSuggestions: [PlaceSuggestion]? = nil
+    /// Optional freeform note the user typed in the detail sheet.
+    /// Surfaced to the LLM via MCP so spend-history questions can be
+    /// grounded in the user's own annotation when one exists. Empty
+    /// strings are normalised to nil by the backend.
+    var notes: String? = nil
 
     enum LocationStatus: String, Codable, Hashable {
         case awaiting

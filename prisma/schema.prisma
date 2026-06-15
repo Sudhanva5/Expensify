@@ -40,6 +40,13 @@ model Transaction {
   rawSubject     String
   rawSnippet     String
 
+  /// Freeform note the user attaches in the iOS detail sheet. Surfaced
+  /// to the LLM via MCP so "what was that ₹3,200 spend?" can carry
+  /// human context the bank email + Places lookup can't supply ("ETF
+  /// rebalance via Zerodha — kept for tax records"). Null until the
+  /// user types something; treated as no-data by every read path.
+  notes          String?  @db.Text
+
   // Location
   locationLat    Decimal?       @db.Decimal(10, 7)
   locationLng    Decimal?       @db.Decimal(10, 7)

@@ -26,6 +26,8 @@ struct TransactionDTO: Codable {
     /// Optional list of nearby Places candidates persisted at recategorize
     /// time, surfaced as suggestions when no auto-tag was possible.
     let placesSuggestions: [PlaceSuggestionDTO]?
+    /// Freeform user note. Null when unset.
+    let notes: String?
 
     struct PlaceSuggestionDTO: Codable {
         let name: String
@@ -109,7 +111,8 @@ struct TransactionDTO: Codable {
                     lng: $0.lng,
                     formattedAddress: $0.formattedAddress
                 )
-            }
+            },
+            notes: notes
         )
     }
 }

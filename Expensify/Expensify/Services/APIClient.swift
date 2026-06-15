@@ -135,6 +135,25 @@ actor APIClient {
         try await patchNoContent(path: "/transactions/\(id)", body: body)
     }
 
+    /// Replace the freeform note on a transaction. Pass an empty string to
+    /// clear it (backend normalises empty → null). Caps at 4 KB on the
+    /// server side, so we don't bother with an iOS-side limit.
+    func updateNotes(transactionId: String, notes: String) async throws {
+        struct Body: Encodable {
+            let notes: String
+        }
+        // Use a raw camelCase encoder — patchBody's zod schema reads `notes`
+        // verbatim, so the snake_case converter would mangle it just like
+        // it would mangle rule conditions.
+        var req = URLRequest(url: Constants.baseURL.appendingPathComponent("/transactions/\(transactionId)"))
+        req.httpMethod = "PATCH"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try plainEncoder.encode(Body(notes: notes))
+        let (data, http) = try await HTTPClient.shared.send(req)
+        try ensure2xx(http: http, data: data)
+    }
+
     /// Transactions whose location is still awaiting upload from iOS, with
     /// their original `occurredAt`. The backfill flow uses occurredAt to
     /// pick the location-history entry closest in time to when each

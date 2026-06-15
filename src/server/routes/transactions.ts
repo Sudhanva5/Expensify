@@ -22,6 +22,11 @@ const patchBody = z.object({
   // The endpoint never accepts `null` — clearing a category isn't supported in V1.
   category: z.string().optional(),
   status: z.enum(['pending_review', 'resolved']).optional(),
+  // Freeform note shown in iOS detail sheet and surfaced to the LLM via
+  // MCP. Empty string clears (treated as null); undefined leaves
+  // unchanged; explicit null also clears. Cap at 4 KB so a runaway
+  // paste doesn't bloat the table.
+  notes: z.string().max(4096).nullable().optional(),
 });
 
 const applyPlaceBody = z.object({
@@ -114,6 +119,7 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
           location_lng: r.locationLng !== null ? Number(r.locationLng) : null,
           location_status: r.locationStatus,
           places_suggestions: r.placesSuggestions ?? null,
+          notes: r.notes,
           receipt: receipt
             ? {
                 id: receipt.id,
@@ -152,10 +158,18 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
         status?: 'pending_review' | 'resolved';
         categoryId?: string;
         matchedRuleId?: string | null;
+        notes?: string | null;
       } = {};
 
       if (parsed.data.status !== undefined) {
         updates.status = parsed.data.status;
+      }
+
+      if (parsed.data.notes !== undefined) {
+        // Empty string normalises to null so the DB doesn't carry
+        // distinguishable "" vs null states for the same intent.
+        const trimmed = parsed.data.notes?.trim();
+        updates.notes = trimmed ? trimmed : null;
       }
 
       if (parsed.data.category !== undefined) {

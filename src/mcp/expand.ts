@@ -60,6 +60,11 @@ export function expandTransaction(
     signalSource: r.signalSource,
     status: r.status,
     template: r.emailTemplate,
+    // User-supplied freeform context typed via the iOS detail sheet.
+    // Always present (null when empty) so the LLM doesn't have to
+    // remember which tools project it; helps the LLM ground answers
+    // in the user's own annotation when one exists.
+    notes: r.notes,
   };
 
   if (includes.has('location')) {
