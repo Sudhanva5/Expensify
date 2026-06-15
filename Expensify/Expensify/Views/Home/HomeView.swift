@@ -197,7 +197,14 @@ struct HomeView: View {
         /// EXCLUDED — the header is communicating "how much money left
         /// my account this month", not net cash position.
         let totalOutflow: Decimal
-        var id: Date { monthStart }
+        /// String id, not Date, so ForEach's diffing doesn't trip on
+        /// any Date-equality subtleties under animated reorder. Format:
+        /// "yyyy-MM" — uniquely identifies the month bucket.
+        var id: String {
+            let cal = Calendar.current
+            let comps = cal.dateComponents([.year, .month], from: monthStart)
+            return String(format: "%04d-%02d", comps.year ?? 0, comps.month ?? 0)
+        }
     }
 
     private func monthSections() -> [MonthSection] {
