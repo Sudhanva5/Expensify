@@ -554,6 +554,101 @@ actor APIClient {
         )
     }
 
+    // MARK: - MCP diagnostics
+    //
+    // Read-only inspection + revoke surface for OAuth-issued bearers on the
+    // MCP service. The MAIN backend owns these endpoints because iOS already
+    // holds the main API_TOKEN — keeping the iOS auth model unchanged. The
+    // main backend reads/writes the McpAccessToken table directly (shared
+    // Postgres) and proxies a health-check at MCP_PUBLIC_URL/health.
+
+    /// Hit the main backend's MCP health proxy. Falls back to an `online:false`
+    /// result on any error so the UI can render an offline badge without
+    /// throwing.
+    func fetchMCPHealth() async -> MCPHealth {
+        struct Wire: Decodable {
+            let ok: Bool
+            let url: String?
+            let statusCode: Int?
+            let error: String?
+            let checkedAt: String?
+        }
+        do {
+            let wire: Wire = try await getJSON(path: "/mcp-admin/health")
+            let checked = wire.checkedAt.flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date()
+            return MCPHealth(
+                url: wire.url ?? "",
+                online: wire.ok,
+                statusCode: wire.statusCode,
+                error: wire.error,
+                checkedAt: checked
+            )
+        } catch {
+            return MCPHealth(
+                url: "",
+                online: false,
+                statusCode: nil,
+                error: error.localizedDescription,
+                checkedAt: Date()
+            )
+        }
+    }
+
+    /// List every OAuth access token the MCP server has issued, newest
+    /// first. Revoked tokens are NOT filtered out — the UI grays them
+    /// out so the user can see what was previously connected.
+    func listMCPTokens() async throws -> [MCPToken] {
+        struct Wire: Decodable {
+            let count: Int
+            let tokens: [TokenWire]
+            struct TokenWire: Decodable {
+                let id: String
+                let clientName: String?
+                let clientId: String
+                let scope: String?
+                let issuedAt: String
+                let expiresAt: String?
+                let lastUsedAt: String?
+                let revokedAt: String?
+            }
+        }
+        let wire: Wire = try await getJSON(path: "/mcp-admin/tokens")
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoNoFrac = ISO8601DateFormatter()
+        let parse: (String?) -> Date? = { s in
+            guard let s, !s.isEmpty else { return nil }
+            return iso.date(from: s) ?? isoNoFrac.date(from: s)
+        }
+        return wire.tokens.map { t in
+            MCPToken(
+                id: t.id,
+                clientName: t.clientName?.trimmingCharacters(in: .whitespaces).isEmpty == false
+                    ? t.clientName!
+                    : "Unknown client",
+                clientId: t.clientId,
+                scope: t.scope,
+                issuedAt: parse(t.issuedAt) ?? Date(),
+                expiresAt: parse(t.expiresAt),
+                lastUsedAt: parse(t.lastUsedAt),
+                revokedAt: parse(t.revokedAt)
+            )
+        }
+    }
+
+    /// Revoke an MCP-issued access token. After this returns, the next
+    /// /mcp request bearing that token 401s. Idempotent — revoking a
+    /// previously-revoked token is a no-op success.
+    func revokeMCPToken(id: String) async throws {
+        var req = URLRequest(url: Constants.baseURL.appendingPathComponent("/mcp-admin/tokens/\(id)"))
+        req.httpMethod = "DELETE"
+        req.setValue("Bearer \(Constants.apiToken)", forHTTPHeaderField: "Authorization")
+        let (data, http) = try await HTTPClient.shared.send(req)
+        // 404 = already gone; treat as success for revoke semantics.
+        if http.statusCode == 404 { return }
+        try ensure2xx(http: http, data: data)
+    }
+
     // MARK: - Internals
 
     private func getJSON<T: Decodable>(path: String) async throws -> T {

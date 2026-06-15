@@ -332,6 +332,99 @@ model EmailReceipt {
 // Google Contacts cache
 // ============================================================
 
+// ============================================================
+// MCP OAuth (claude.ai web custom connector flow)
+// ============================================================
+//
+// The MCP server is also reachable by direct static-bearer (MCP_TOKEN env)
+// — that's how Claude Code and Claude Desktop connect. claude.ai web's
+// custom-connector flow REQUIRES OAuth 2.1 with PKCE + dynamic client
+// registration; these three tables back that flow.
+//
+// Single-user model: the "user" is the holder of the static MCP_TOKEN,
+// which acts as the password on the consent screen. Every Claude client
+// that completes the OAuth dance gets its own short-lived auth code and
+// its own opaque access token, both rooted in McpOAuthClient.
+//
+// Access tokens are stored as sha256 hashes — the raw value is shown to
+// the client exactly once at /token exchange and never again. iOS can
+// revoke a token (sets revokedAt), but cannot recover the raw value.
+
+model McpOAuthClient {
+  /// We hand this id out to the client at /register; it travels in every
+  /// /authorize and /token call. Random 16-byte hex, not a cuid, because
+  /// some OAuth clients balk at non-hex client_ids.
+  id                      String   @id
+  clientName              String?
+  /// `client_name` (OAuth 2.0 dynamic client metadata, RFC 7591). We mirror
+  /// the field name so /register can echo it back verbatim.
+  redirectUris            String[]
+  grantTypes              String[]
+  responseTypes           String[]
+  /// Always "none" in our V1 — Claude clients are public clients using PKCE,
+  /// no client secret. Kept on the row for future expansion.
+  tokenEndpointAuthMethod String   @default("none")
+  scope                   String?
+  /// Original /register body, kept verbatim for debugging + audit. Future
+  /// optional metadata fields go here without a schema migration.
+  metadata                Json
+  createdAt               DateTime @default(now())
+  lastUsedAt              DateTime?
+
+  authCodes               McpAuthCode[]
+  accessTokens            McpAccessToken[]
+
+  @@index([createdAt])
+}
+
+model McpAuthCode {
+  /// The authorization code itself. Single-use; we set `consumed=true`
+  /// the moment /token exchange happens. Indexed (PK) for the O(1)
+  /// lookup by code value.
+  code                String         @id
+  client              McpOAuthClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId            String
+  redirectUri         String
+  /// PKCE code challenge from /authorize. We only support S256 (the
+  /// only method MCP clients use; RFC 8252 also recommends S256).
+  codeChallenge       String
+  codeChallengeMethod String         @default("S256")
+  scope               String?
+  expiresAt           DateTime
+  consumed            Boolean        @default(false)
+  createdAt           DateTime       @default(now())
+
+  @@index([clientId])
+  @@index([expiresAt])
+}
+
+model McpAccessToken {
+  id          String         @id @default(cuid())
+  /// sha256(rawToken) in hex. The raw token is shown to the client exactly
+  /// once at /token exchange and never persisted. Lookup on /mcp requests
+  /// re-hashes the bearer and matches against this column.
+  tokenHash   String         @unique
+  client      McpOAuthClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId    String
+  scope       String?
+  /// Human-readable name surfaced in the iOS Diagnostics UI. Derived from
+  /// the client's `client_name` at issuance, frozen so revocation lists
+  /// don't mutate if the client later re-registers with a new name.
+  label       String?
+  issuedAt    DateTime       @default(now())
+  /// Optional expiry. Null means "never expires" — fine for a single-user
+  /// app where the iOS revoke button is the lifecycle control.
+  expiresAt   DateTime?
+  /// Bumped on every successful /mcp call; nullable until first use.
+  lastUsedAt  DateTime?
+  /// Set when iOS clicks "revoke". /mcp auth check treats any row with
+  /// revokedAt != null as invalid.
+  revokedAt   DateTime?
+
+  @@index([clientId])
+  @@index([revokedAt])
+}
+
 /// Snapshot of the authenticated user's Google contacts, populated by
 /// the People API sync script. Used to attach a "who am I paying"
 /// photo on P2P UPI rows even when the iOS address book doesn't have

@@ -14,6 +14,7 @@ import { transactionsRoute } from './server/routes/transactions.js';
 import { budgetsRoute } from './server/routes/budgets.js';
 import { rulesRoute } from './server/routes/rules.js';
 import { contactsRoute } from './server/routes/contacts.js';
+import { mcpAdminRoute } from './server/routes/mcpAdmin.js';
 import { scheduleWatchRefresh } from './server/cron.js';
 
 export async function buildServer() {
@@ -32,6 +33,7 @@ export async function buildServer() {
   await app.register(budgetsRoute, { prefix: '/budgets' });
   await app.register(rulesRoute, { prefix: '/rules' });
   await app.register(contactsRoute, { prefix: '/contacts' });
+  await app.register(mcpAdminRoute, { prefix: '/mcp-admin' });
 
   return app;
 }

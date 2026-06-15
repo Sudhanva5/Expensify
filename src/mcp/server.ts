@@ -1,24 +1,32 @@
 // Remote MCP server for Expense Solver.
 //
 // Transport: Streamable HTTP (the modern MCP transport — single endpoint,
-// stateless, JSON or SSE depending on the request). Authenticated with a
-// static bearer token (`MCP_TOKEN` env). Runs as its own Railway service
-// alongside the main backend, sharing the same Postgres via Prisma.
+// stateless, JSON or SSE depending on the request).
+//
+// Auth modes (both work, checked in order):
+//   1. Static bearer — `Authorization: Bearer <MCP_TOKEN>`. Used by
+//      Claude Code / Claude Desktop, who accept a static header in their
+//      config and skip the OAuth dance entirely.
+//   2. OAuth bearer — bearer token issued via the /authorize → /token flow
+//      and stored hashed in McpAccessToken. Used by claude.ai web's
+//      custom-connector flow, which requires dynamic client registration
+//      and PKCE.
+//
+// On unauthenticated /mcp requests we set WWW-Authenticate pointing at
+// /.well-known/oauth-protected-resource so MCP clients can discover the
+// OAuth metadata.
 //
 // Mode is intentionally STATELESS: every POST gets a fresh McpServer +
-// transport pair, then they're closed when the response ends. All tools
-// here are read-only, so there's no session state to thread across
-// requests. Stateless mode is also the simplest thing to operate (no
-// session map to GC, no broken-pipe bookkeeping).
+// transport pair, then they're closed when the response ends.
 //
 // Health endpoints mirror the main backend's split:
 //   /health     — DB-free liveness probe (Railway healthcheck target)
 //   /health/db  — readiness probe that pings Postgres
 // If /health touched the DB and Postgres blipped, Railway would mark the
-// service down and the next deploy would fail too. The split keeps the
-// service alive through transient DB outages.
+// service down. The split keeps the service alive through DB outages.
 
 import Fastify from 'fastify';
+import type { FastifyRequest, FastifyReply } from 'fastify';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { prisma } from '../db/client.js';
@@ -26,18 +34,17 @@ import { registerSpendTools } from './handlers/spend.js';
 import { registerBudgetTools } from './handlers/budgets.js';
 import { registerRuleTools } from './handlers/rules.js';
 import { registerDebugTools } from './handlers/debug.js';
+import { oauthRoutes } from './oauth/routes.js';
+import { lookupActiveToken } from './oauth/store.js';
 
 function buildMcpServer(): McpServer {
   const server = new McpServer(
     {
       name: 'expense-solver',
-      version: '0.1.0',
+      version: '0.2.0',
     },
     {
       capabilities: {
-        // Tools only — no prompts, no resources for V1. Adding either later
-        // means re-declaring here AND updating the transport mode if any of
-        // them carry state.
         tools: {},
       },
       instructions:
@@ -53,11 +60,62 @@ function buildMcpServer(): McpServer {
   return server;
 }
 
+/// Resolves the bearer token on a request, returning a tag describing
+/// which auth path matched. `null` means no valid credential was found
+/// — caller emits 401 with WWW-Authenticate.
+type AuthOutcome =
+  | { kind: 'static' }
+  | { kind: 'oauth'; clientName: string | null }
+  | { kind: 'reject'; reason: string };
+
+async function authorize(req: FastifyRequest): Promise<AuthOutcome> {
+  const header = req.headers['authorization'];
+  if (!header || typeof header !== 'string') {
+    return { kind: 'reject', reason: 'missing_authorization' };
+  }
+  const match = /^Bearer\s+(.+)$/.exec(header);
+  if (!match) {
+    return { kind: 'reject', reason: 'invalid_authorization_scheme' };
+  }
+  const token = match[1]!.trim();
+
+  const staticToken = process.env['MCP_TOKEN'];
+  if (staticToken && token === staticToken) {
+    return { kind: 'static' };
+  }
+
+  // Fall through to the OAuth-issued-token table. lookupActiveToken bumps
+  // lastUsedAt as a side effect, so we only consult the DB when the
+  // static-token comparison didn't match.
+  const oauthHit = await lookupActiveToken(token);
+  if (oauthHit) {
+    return { kind: 'oauth', clientName: oauthHit.clientName };
+  }
+
+  return { kind: 'reject', reason: 'invalid_token' };
+}
+
+/// Build the WWW-Authenticate header per RFC 9728 §5.2. The
+/// `resource_metadata` parameter lets MCP clients discover the OAuth
+/// flow without already knowing about this server.
+function wwwAuthenticateHeader(req: FastifyRequest): string {
+  const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
+  const host = req.headers['host'] as string;
+  const base = process.env['MCP_PUBLIC_URL']?.replace(/\/$/, '') || `${proto}://${host}`;
+  const metadataUrl = `${base}/.well-known/oauth-protected-resource`;
+  return `Bearer realm="expense-solver", resource_metadata="${metadataUrl}"`;
+}
+
+async function reject401(req: FastifyRequest, reply: FastifyReply, error: string): Promise<void> {
+  reply
+    .code(401)
+    .header('www-authenticate', wwwAuthenticateHeader(req))
+    .send({ error });
+}
+
 async function bootstrap(): Promise<void> {
   const app = Fastify({
     logger: { level: process.env['LOG_LEVEL'] ?? 'info' },
-    // Fastify defaults to a 1 MiB body limit. MCP requests are small JSON-RPC
-    // envelopes; this is plenty.
   });
 
   app.get('/health', async () => ({
@@ -76,40 +134,31 @@ async function bootstrap(): Promise<void> {
     }
   });
 
+  await app.register(oauthRoutes);
+
   // Single MCP endpoint. POST is the standard direction (client → server
   // JSON-RPC). GET / DELETE are part of the spec for SSE upgrade and
-  // session termination, but stateless mode rejects them cleanly via
-  // the transport's own handling — we just need to forward.
+  // session termination, but stateless mode handles them inside the
+  // transport — we just need to forward.
   app.all('/mcp', async (req, reply) => {
-    const expected = process.env['MCP_TOKEN'];
-    if (!expected) {
-      req.log.error('MCP_TOKEN not configured on server');
-      reply.code(500).send({ error: 'MCP_TOKEN not configured' });
+    const auth = await authorize(req);
+    if (auth.kind === 'reject') {
+      await reject401(req, reply, auth.reason);
       return;
     }
 
-    const auth = req.headers['authorization'];
-    if (auth !== `Bearer ${expected}`) {
-      reply.code(401).send({ error: 'Unauthorized' });
-      return;
-    }
-
-    // Hand the raw Node req/res over to the MCP transport. Fastify must not
-    // try to write its own response on top — reply.hijack() detaches it.
+    // Hand the raw Node req/res over to the MCP transport. Fastify must
+    // not try to write its own response on top — reply.hijack() detaches it.
     reply.hijack();
 
     const mcpServer = buildMcpServer();
     const transport = new StreamableHTTPServerTransport({
-      // No session id → stateless mode. Each request is independent.
       sessionIdGenerator: undefined,
     });
 
-    // When the client disconnects (or the response finishes naturally), tear
-    // down the per-request server + transport pair so we don't leak Prisma
-    // connections or event listeners.
     reply.raw.on('close', () => {
-      void transport.close().catch(() => {});
-      void mcpServer.close().catch(() => {});
+      void transport.close().catch(() => undefined);
+      void mcpServer.close().catch(() => undefined);
     });
 
     try {
@@ -119,9 +168,7 @@ async function bootstrap(): Promise<void> {
       req.log.error({ err }, '[mcp] handleRequest failed');
       if (!reply.raw.headersSent) {
         reply.raw.writeHead(500, { 'content-type': 'application/json' });
-        reply.raw.end(
-          JSON.stringify({ error: 'Internal MCP error' }),
-        );
+        reply.raw.end(JSON.stringify({ error: 'Internal MCP error' }));
       } else {
         reply.raw.end();
       }
