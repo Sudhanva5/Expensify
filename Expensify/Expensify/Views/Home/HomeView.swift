@@ -252,9 +252,17 @@ struct HomeView: View {
                     .foregroundStyle(AppColor.textPrimary)
                 Spacer(minLength: 8)
                 Text(formatRupees(section.totalOutflow))
-                    .font(.system(size: 16, weight: .semibold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 19, weight: .semibold, design: .rounded).monospacedDigit())
                     .foregroundStyle(AppColor.textPrimary)
             }
+            // Hairline rule under the title block — separates each month
+            // bucket as the user scrolls "all transactions" so the
+            // year+month+total reads as one self-contained header,
+            // not as another row in the list.
+            Rectangle()
+                .fill(AppColor.hairline)
+                .frame(height: 0.5)
+                .padding(.top, 6)
         }
     }
 
