@@ -98,10 +98,15 @@ export async function gmailWebhookRoute(app: FastifyInstance): Promise<void> {
       const outcome = await processGmailMessage(msg, ctx);
       app.log.info({ outcome }, 'gmail message processed');
 
-      // Fire a silent push so the iOS app can attach the user's current GPS
-      // to this transaction. Best-effort: never blocks the pipeline.
+      // Fire a silent push so the iOS app can correlate this transaction
+      // with its on-device spend-time location buffer. occurredAt rides
+      // in the payload so the app can look up the right historical
+      // buffer entry instead of grabbing where the user is RIGHT NOW
+      // (which is almost never where the bank-email-side spend happened).
+      // Best-effort: never blocks the pipeline.
       if (outcome.kind === 'processed' && outcome.needsLocation) {
-        void requestLocationFromAllDevices(outcome.transactionId).catch((err) =>
+        const occurredAt = new Date(outcome.occurredAt);
+        void requestLocationFromAllDevices(outcome.transactionId, occurredAt).catch((err) =>
           app.log.error({ err, txId: outcome.transactionId }, 'APNs location request failed'),
         );
       }

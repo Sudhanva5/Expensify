@@ -2,29 +2,27 @@ import Foundation
 import CoreLocation
 
 /// Catches up `awaiting_location` transactions when the silent push failed
-/// to wake the app (Low Power Mode, push throttling, app force-quit, etc.).
+/// to wake the app (Low Power Mode, push throttling, etc.).
 ///
-/// Called from `AppDelegate.applicationDidBecomeActive`. Strategy:
-///   1. Take a fresh, accuracy-bounded location reading via `fetchOnce`
-///      (which now WAITS for sub-30m GPS instead of grabbing the first
-///      stale cell-tower estimate).
-///   2. Pull the awaiting list.
-///   3. For each row whose `occurredAt` is within `recentWindow`, post
-///      the fresh location. Anything older than that is left awaiting —
-///      we used to fill it in from SLC history but those readings were
-///      ~500m-accurate and were the main source of the bad Places tags.
-///      Old awaiting rows just sit in the review queue without a map;
-///      the user can tag them manually.
+/// Called from `AppDelegate.applicationDidBecomeActive`. Strategy now
+/// favours the spend-time buffer over a fresh fetchOnce:
 ///
-/// SLC wake-ups no longer trigger backfill. Their readings are too coarse.
-/// They still keep the location subsystem warm so a foreground `fetchOnce`
-/// resolves faster.
+///   1. Pull the awaiting list (each row carries its own occurredAt).
+///   2. For each row, look up `LocationService.closestEntry(to: occurredAt)`
+///      — the buffer entry from when the user actually spent the money,
+///      not where they happen to be sitting right now.
+///   3. If the buffer has nothing usable AND the spend happened in the
+///      last 5 min, take ONE fresh fetchOnce and use it for every recent
+///      row. Cheap and right for the "I just spent and re-opened the app"
+///      case.
+///   4. Older rows with no buffer hit get LEFT awaiting. Tagging a
+///      6-hour-old hotel charge with "user's current location at the
+///      airport" is exactly the bug this whole refactor exists to fix.
 actor BackfillService {
     static let shared = BackfillService()
 
-    /// Only attach a fresh foreground location to transactions that
-    /// occurred within this window. Beyond it, the user has almost
-    /// certainly moved, so guessing is worse than no location.
+    /// Only fall back to a NOW fetchOnce for transactions this recent.
+    /// Older rows depend entirely on the spend-time buffer.
     private static let recentWindow: TimeInterval = 5 * 60
 
     private var inFlight = false
@@ -51,19 +49,35 @@ actor BackfillService {
             return
         }
 
-        let cutoff = Date().addingTimeInterval(-Self.recentWindow)
-        let recent = awaitingList.filter { $0.occurredAt >= cutoff }
-        if recent.isEmpty {
-            #if DEBUG
-            print("[Backfill] \(awaitingList.count) awaiting rows, none within \(Int(Self.recentWindow))s window — leaving for manual review")
-            #endif
-            return
+        // Pass 1: spend-time buffer lookup for EVERY awaiting row,
+        // regardless of age. The buffer carries up to 14 days of
+        // history; if the user opened the app and we have an entry
+        // from when the spend happened, we can ground it.
+        var bufferHits = 0
+        var stillNeedingNow: [APIClient.AwaitingTransaction] = []
+        for awaiting in awaitingList {
+            if let entry = LocationService.shared.closestEntry(
+                to: awaiting.occurredAt,
+                withinSeconds: 10 * 60,
+                withMinAccuracy: 100
+            ) {
+                await upload(entry: entry, for: awaiting.id, occurredAt: awaiting.occurredAt)
+                bufferHits += 1
+            } else if awaiting.occurredAt >= Date().addingTimeInterval(-Self.recentWindow) {
+                stillNeedingNow.append(awaiting)
+            }
         }
 
+        #if DEBUG
+        print("[Backfill] \(awaitingList.count) awaiting, \(bufferHits) resolved from buffer, \(stillNeedingNow.count) recent rows need a fresh fix")
+        #endif
+
+        // Pass 2: one fresh fetchOnce for any recent rows the buffer
+        // didn't cover. Conservative — old rows without buffer hits
+        // are left for manual review.
+        guard !stillNeedingNow.isEmpty else { return }
         let location: CLLocation
         do {
-            // Reuses the new accuracy-bounded fetcher: waits up to ~15s
-            // for a sub-30m fix, falls back to the best reading seen.
             location = try await LocationService.shared.fetchOnce()
         } catch {
             #if DEBUG
@@ -71,14 +85,8 @@ actor BackfillService {
             #endif
             return
         }
-
-        #if DEBUG
-        print("[Backfill] attaching \(Int(location.horizontalAccuracy))m fix to \(recent.count) recent awaiting row(s)")
-        #endif
-
         let city = await LocationService.reverseGeocode(location)
-
-        for awaiting in recent {
+        for awaiting in stillNeedingNow {
             do {
                 try await APIClient.shared.uploadLocation(
                     transactionId: awaiting.id,
@@ -88,13 +96,41 @@ actor BackfillService {
                 )
                 #if DEBUG
                 let delta = Int(-awaiting.occurredAt.timeIntervalSinceNow)
-                print("[Backfill] uploaded for \(awaiting.id) — Δtime \(delta)s")
+                print("[Backfill] fetchOnce uploaded for \(awaiting.id) — Δtime \(delta)s, \(Int(location.horizontalAccuracy))m")
                 #endif
             } catch {
                 #if DEBUG
                 print("[Backfill] upload failed for \(awaiting.id): \(error)")
                 #endif
             }
+        }
+    }
+
+    /// Upload a single buffer entry. Pulled out so the spend-time and
+    /// fetchOnce paths use identical wire shape.
+    private func upload(
+        entry: LocationTrace,
+        for transactionId: String,
+        occurredAt: Date
+    ) async {
+        let city = await LocationService.reverseGeocode(
+            CLLocation(latitude: entry.lat, longitude: entry.lng)
+        )
+        do {
+            try await APIClient.shared.uploadLocation(
+                transactionId: transactionId,
+                latitude: entry.lat,
+                longitude: entry.lng,
+                city: city
+            )
+            #if DEBUG
+            let delta = Int(abs(entry.timestamp.timeIntervalSince(occurredAt)))
+            print("[Backfill] buffer uploaded for \(transactionId) — \(Int(entry.accuracy))m, Δtime \(delta)s")
+            #endif
+        } catch {
+            #if DEBUG
+            print("[Backfill] upload failed for \(transactionId): \(error)")
+            #endif
         }
     }
 }

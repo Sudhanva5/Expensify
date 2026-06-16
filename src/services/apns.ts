@@ -46,6 +46,11 @@ function getProvider(): apn.Provider | null {
 interface LocationRequestPushArgs {
   apnsToken: string;
   transactionId: string;
+  /// The transaction's `occurredAt`. Travels in the push payload so iOS
+  /// can match against its on-device spend-time buffer instead of doing
+  /// a fetchOnce-NOW (which captures wherever the user is when the push
+  /// finally lands, not where they were when the bank email arrived).
+  occurredAt: Date;
 }
 
 /// Send a single silent push asking the device to upload its location for the
@@ -70,6 +75,7 @@ export async function sendLocationRequestPush(args: LocationRequestPushArgs): Pr
   note.payload = {
     kind: 'request_location',
     transactionId: args.transactionId,
+    occurredAt: args.occurredAt.toISOString(),
   };
   // 90-second relevance window. If APNs can't deliver within that, the
   // user has almost certainly moved away from the transaction site —
@@ -104,14 +110,21 @@ export async function sendLocationRequestPush(args: LocationRequestPushArgs): Pr
 
 /// Convenience wrapper: load every registered device for the (single, V1) user
 /// and fan out the push. Logs but never throws.
-export async function requestLocationFromAllDevices(transactionId: string): Promise<void> {
+export async function requestLocationFromAllDevices(
+  transactionId: string,
+  occurredAt: Date,
+): Promise<void> {
   const devices = await prisma.deviceToken.findMany();
   if (devices.length === 0) {
     console.warn('[APNs] no registered devices; cannot request location for', transactionId);
     return;
   }
   for (const d of devices) {
-    await sendLocationRequestPush({ apnsToken: d.apnsToken, transactionId });
+    await sendLocationRequestPush({
+      apnsToken: d.apnsToken,
+      transactionId,
+      occurredAt,
+    });
   }
 }
 

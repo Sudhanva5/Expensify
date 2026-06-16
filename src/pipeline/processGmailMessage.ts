@@ -52,6 +52,7 @@ export type ProcessOutcome =
       vpa: string | null;
       direction: 'in' | 'out';
       instrument: string;
+      occurredAt: string;
       pickedCategory: string | null;
       confidence: number | null;
       status: 'auto_resolved' | 'needs_review';
@@ -278,6 +279,7 @@ export async function processGmailMessage(
     vpa: parseResult.data.vpa,
     direction: parseResult.data.direction,
     instrument: parseResult.data.instrument,
+    occurredAt: parseResult.data.occurredAt.toISOString(),
     pickedCategory: categorization.picked?.category ?? null,
     confidence: categorization.picked?.confidence ?? null,
     status: categorization.status,

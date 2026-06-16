@@ -73,6 +73,20 @@ final class PushService: NSObject, UNUserNotificationCenterDelegate {
     /// application(_:didReceiveRemoteNotification:fetchCompletionHandler:).
     /// Returns the right UIBackgroundFetchResult so iOS knows whether to keep
     /// trusting us with future background time.
+    ///
+    /// Two-tier resolution against the new spend-time buffer:
+    ///   1. Look up the closest buffer entry to the transaction's
+    ///      `occurredAt`. If a sub-100m reading exists within ±10 min,
+    ///      use that — gives us where the user actually was at spend-time,
+    ///      not where they are NOW when this push happened to land.
+    ///   2. If the buffer has nothing usable AND the spend is recent
+    ///      (<2 min old), fall back to fetchOnce-now. This preserves the
+    ///      old behavior for transactions where the push lands immediately
+    ///      and the user is still at the merchant.
+    ///   3. Otherwise abort — `noData` so iOS knows the push didn't
+    ///      produce useful work but isn't a failure either. The row
+    ///      stays awaiting; foreground catchup will retry from the
+    ///      buffer next time the app opens.
     func handleSilentPush(userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
         guard
             let kind = userInfo["kind"] as? String,
@@ -85,11 +99,61 @@ final class PushService: NSObject, UNUserNotificationCenterDelegate {
             return .noData
         }
 
+        // Parse occurredAt from the payload. Server-side change
+        // includes this as an ISO 8601 string. Push payloads that
+        // pre-date the server change won't carry it; in that case we
+        // fall back to "now" which preserves legacy behavior.
+        let occurredAt: Date = {
+            if let iso = userInfo["occurredAt"] as? String {
+                let f = ISO8601DateFormatter()
+                f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                if let d = f.date(from: iso) { return d }
+                let g = ISO8601DateFormatter()
+                if let d = g.date(from: iso) { return d }
+            }
+            return Date()
+        }()
+
+        // Tier 1 — spend-time buffer match.
+        if let entry = LocationService.shared.closestEntry(
+            to: occurredAt,
+            withinSeconds: 10 * 60,
+            withMinAccuracy: 100
+        ) {
+            let city = await LocationService.reverseGeocode(
+                CLLocation(latitude: entry.lat, longitude: entry.lng)
+            )
+            do {
+                try await APIClient.shared.uploadLocation(
+                    transactionId: txId,
+                    latitude: entry.lat,
+                    longitude: entry.lng,
+                    city: city
+                )
+                #if DEBUG
+                let delta = Int(abs(entry.timestamp.timeIntervalSince(occurredAt)))
+                print("[PushService] buffer hit for \(txId) — entry \(Int(entry.accuracy))m, Δtime \(delta)s, city: \(city ?? "?")")
+                #endif
+                return .newData
+            } catch {
+                #if DEBUG
+                print("[PushService] buffer-hit upload failed: \(error)")
+                #endif
+                return .failed
+            }
+        }
+
+        // Tier 2 — fresh fetchOnce, but ONLY if the spend is recent
+        // enough that "current location" is still meaningful.
+        let spendAge = -occurredAt.timeIntervalSinceNow
+        if spendAge > 2 * 60 {
+            #if DEBUG
+            print("[PushService] skip stale push for \(txId) — spend was \(Int(spendAge))s ago, no buffer hit")
+            #endif
+            return .noData
+        }
+
         do {
-            // fetchOnce now WAITS for a sub-30m fix (up to 15s) instead of
-            // grabbing the first cached cell-tower reading. Critical: we
-            // only have ~30s of background time from the silent push, so
-            // the timeout is sized to leave room for the upload that follows.
             let location = try await LocationService.shared.fetchOnce()
             let city = await LocationService.reverseGeocode(location)
             try await APIClient.shared.uploadLocation(
@@ -99,7 +163,7 @@ final class PushService: NSObject, UNUserNotificationCenterDelegate {
                 city: city
             )
             #if DEBUG
-            print("[PushService] uploaded \(Int(location.horizontalAccuracy))m fix for \(txId) — city: \(city ?? "?")")
+            print("[PushService] fetchOnce fallback for \(txId) — \(Int(location.horizontalAccuracy))m, city: \(city ?? "?")")
             #endif
             return .newData
         } catch {

@@ -62,22 +62,8 @@ export async function recategorizeWithLocation(opts: {
   });
   if (!tx) return { updated: false, reason: 'transaction_not_found' };
 
-  // Already-confident rows don't need re-tagging. Skip any resolved row
-  // whose signal source we trust at auto-tag confidence — alias,
-  // autopay alias, an explicit merchant or VPA pattern hit, a user rule,
-  // or a previously-claimed Places suggestion. Without this, a backfill
-  // sweep or a manual GPS re-upload could overwrite a confirmation the
-  // user has already made.
-  const TRUSTED_SOURCES = new Set([
-    'alias',
-    'autopay_alias',
-    'merchant_pattern',
-    'user_rule',
-    'places',
-  ]);
-  if (tx.status === 'resolved' && tx.signalSource && TRUSTED_SOURCES.has(tx.signalSource)) {
-    return { updated: false, reason: `already_resolved_${tx.signalSource}` };
-  }
+  // Cheap top-level filters that DON'T need Places — bail without
+  // burning an API call for inbound rows or online merchants.
   if (tx.direction !== 'out') {
     return { updated: false, reason: 'not_outflow' };
   }
@@ -96,43 +82,23 @@ export async function recategorizeWithLocation(opts: {
     };
   }
 
-  // P2P guard — the GPay-rail equivalent of the online-merchant guard.
-  // Personal-shape VPAs (sneha.r@oksbi, sagarprabhu251-1@okhdfcbank,
-  // 9876543210@ybl) are person-to-person UPI transfers, not visits to
-  // a physical storefront. Without this, a ₹1 test payment to a friend
-  // would happily snap to the nearest ice-cream shop and rename the
-  // row "Apsara Ice Creams" — exactly the bug we just hit. Refuse to
-  // Places-resolve any personal VPA, full stop.
-  if (tx.vpa && classifyVpa(tx.vpa) === 'personal') {
-    return { updated: false, reason: 'p2p_vpa' };
-  }
-
-  // Re-evaluate user rules with location context. Rules can carry a
-  // `locationWithinRadius` condition (e.g. "near my office") that's
-  // impossible to evaluate at ingest. Now that we have the iPhone's
-  // GPS, walk through rules priority-first and apply any that fire
-  // at auto-tag confidence (≥0.95). User rules beat Places matching
-  // because user intent is more reliable than nearby-shop guesses.
-  const ruleHit = await tryApplyLocationAwareRule({
-    tx,
-    lat: opts.lat,
-    lng: opts.lng,
-  });
-  if (ruleHit) return ruleHit;
-
   // Ask Places for a 30m sample so the haversine filter at STRICT_DISTANCE_M
   // has enough candidates to choose from. Auto-tag still requires single-
   // strong-match within the strict radius; widening the search just gives
   // the suggestion picker more rows to render.
+  //
+  // IMPORTANT: this runs BEFORE the already-resolved + p2p gates below.
+  // Suggestions persist on every located row — even ones where alias /
+  // VPA-shape already auto-tagged, or P2P rows where we'd never tag from
+  // Places — so the iOS picker has 4-5 nearby places to show the user
+  // for ANY transaction with a GPS fix. Saving suggestions is read-only
+  // metadata; it doesn't overwrite the tag.
   let candidates;
   try {
     candidates = await places.nearby({ lat: opts.lat, lng: opts.lng, radiusMeters: 30 });
   } catch (err) {
     console.error('[recategorize] Places lookup failed:', err);
     return { updated: false, reason: 'places_call_failed' };
-  }
-  if (candidates.length === 0) {
-    return { updated: false, reason: 'no_nearby_places' };
   }
 
   // The Places API "radius" is a hint, not a hard filter — it'll happily
@@ -146,9 +112,6 @@ export async function recategorizeWithLocation(opts: {
     if (!c.lat || !c.lng) return false;
     return haversineMeters(opts.lat, opts.lng, c.lat, c.lng) <= STRICT_DISTANCE_M;
   });
-  if (tightlyNearby.length === 0) {
-    return { updated: false, reason: 'no_places_within_strict_distance' };
-  }
 
   // Find every candidate whose types map to a V1 category.
   const matched = tightlyNearby
@@ -156,10 +119,9 @@ export async function recategorizeWithLocation(opts: {
     .filter((row): row is { candidate: typeof tightlyNearby[number]; match: NonNullable<ReturnType<typeof mapPlacesTypesToCategory>> } => row.match !== null);
 
   // Persist the top mapped candidates as "suggestions" regardless of
-  // whether we can auto-pick one. iOS surfaces these as a "Nearby
-  // places" picker in the detail sheet so the user can claim the right
-  // one in one tap. Saved with distance + category so the picker can
-  // show meaningful chips.
+  // whether we can auto-pick one and regardless of whether the row is
+  // already resolved. iOS surfaces these as a "Nearby places" picker
+  // in the detail sheet so the user can claim the right one in one tap.
   const suggestions = matched.slice(0, 5).map(({ candidate, match }) => ({
     name: candidate.name,
     category: match.category,
@@ -179,6 +141,55 @@ export async function recategorizeWithLocation(opts: {
     });
   }
 
+  // Already-confident rows don't need re-tagging — the suggestions we
+  // just saved are the only thing they needed from this pass. Skip any
+  // resolved row whose signal source we trust at auto-tag confidence so
+  // a backfill sweep can't overwrite a user confirmation.
+  const TRUSTED_SOURCES = new Set([
+    'alias',
+    'autopay_alias',
+    'merchant_pattern',
+    'user_rule',
+    'places',
+  ]);
+  if (tx.status === 'resolved' && tx.signalSource && TRUSTED_SOURCES.has(tx.signalSource)) {
+    return { updated: false, reason: `already_resolved_${tx.signalSource}` };
+  }
+
+  // P2P guard — the GPay-rail equivalent of the online-merchant guard.
+  // Personal-shape VPAs (sneha.r@oksbi, sagarprabhu251-1@okhdfcbank,
+  // 9876543210@ybl) are person-to-person UPI transfers, not visits to
+  // a physical storefront. Without this, a ₹1 test payment to a friend
+  // would happily snap to the nearest ice-cream shop and rename the
+  // row "Apsara Ice Creams" — exactly the bug we just hit. Refuse to
+  // Places-resolve any personal VPA, full stop. (Suggestions above are
+  // fine — read-only metadata, no automatic rename.)
+  if (tx.vpa && classifyVpa(tx.vpa) === 'personal') {
+    return { updated: false, reason: 'p2p_vpa' };
+  }
+
+  // Re-evaluate user rules with location context. Rules can carry a
+  // `locationWithinRadius` condition (e.g. "near my office") that's
+  // impossible to evaluate at ingest. Now that we have the iPhone's
+  // GPS, walk through rules priority-first and apply any that fire
+  // at auto-tag confidence (≥0.95). User rules beat Places matching
+  // because user intent is more reliable than nearby-shop guesses.
+  const ruleHit = await tryApplyLocationAwareRule({
+    tx,
+    lat: opts.lat,
+    lng: opts.lng,
+  });
+  if (ruleHit) return ruleHit;
+
+  // Beyond this point we're trying to auto-tag from a Places match.
+  // If Places returned nothing usable, the row stays pending_review
+  // (suggestions, if any, are already persisted above).
+  if (candidates.length === 0) {
+    return { updated: false, reason: 'no_nearby_places' };
+  }
+  if (tightlyNearby.length === 0) {
+    return { updated: false, reason: 'no_places_within_strict_distance' };
+  }
   if (matched.length === 0) {
     return { updated: false, reason: 'no_recognized_place_type' };
   }
