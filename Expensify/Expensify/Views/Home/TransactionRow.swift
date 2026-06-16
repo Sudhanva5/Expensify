@@ -73,6 +73,7 @@ struct TransactionRow: View {
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())
+        .onTapGesture { showDetailSheet = true }
         .sheet(isPresented: $showDetailSheet) {
             TransactionDetailSheet(
                 transaction: transaction,
@@ -82,36 +83,17 @@ struct TransactionRow: View {
         }
     }
 
-    /// Category line + (optional) location chip + (optional) ⓘ. Chip is
-    /// shown only when we have a Places-resolved name; ⓘ is shown when
-    /// either Places resolved this OR we just have coords (e.g. iOS
-    /// uploaded location but no Places match) — so the user always has a
-    /// way into the detail/map sheet when there's something to see.
+    /// Category line. The whole row is tappable now (opens the detail
+    /// sheet), so we no longer carry a "more details" affordance here.
+    /// Earlier the chip was the only entry point into the sheet —
+    /// effectively gating notes / map / receipt access on the row
+    /// having coords or a receipt, which left plain rows unreachable.
     @ViewBuilder
     private var metaLine: some View {
         HStack(spacing: 6) {
             Text(categoryText)
                 .font(.system(size: 13))
                 .foregroundStyle(AppColor.textSecondary)
-
-            // "more details" chip — opens the bottom sheet with the map +
-            // probable-place name. Replaced the inline location chip + the
-            // bare ⓘ glyph; a labeled chip is more discoverable than a
-            // single icon and clearer about what tapping will do.
-            if shouldShowInfo {
-                Button(action: { showDetailSheet = true }) {
-                    Text("more details")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(AppColor.tap)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(AppColor.tap.opacity(0.08))
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Show transaction details")
-            }
-
             Spacer(minLength: 0)
         }
     }
@@ -175,23 +157,6 @@ struct TransactionRow: View {
             return nil
         }
         return cn
-    }
-
-    /// Show the "more details" chip only when the sheet has something
-    /// the user can't already see on the row itself:
-    ///   • a map preview (we have GPS coords)
-    ///   • a Gmail-sourced receipt (online merchant order details)
-    ///   • un-claimed Places suggestions (tap-to-tag picker)
-    ///
-    /// Deliberately NOT triggered by `hasResolvedMerchant` alone —
-    /// alias-resolved rows like "NAME-CHEAP.COM* S0EXHV → Namecheap"
-    /// have a different merchantNormalized than merchantRaw but there
-    /// is no additional content for the sheet to show. Showing the
-    /// chip there is just a confusing no-op tap.
-    private var shouldShowInfo: Bool {
-        transaction.hasCoordinates ||
-        transaction.receipt != nil ||
-        (transaction.placesSuggestions?.isEmpty == false)
     }
 
     private var categoryText: String {
