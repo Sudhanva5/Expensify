@@ -198,7 +198,7 @@ struct CategoryDetailView: View {
                                 editingTagFor = tx
                             }
                         } label: {
-                            Label("Edit Tag", systemImage: "tag")
+                            Label("Edit", systemImage: "slider.horizontal.3")
                         }
                         .tint(AppColor.tap)
                     }

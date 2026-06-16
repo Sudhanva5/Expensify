@@ -36,6 +36,11 @@ struct CategoryPickerSheet: View {
     @State private var renameDraft: String = ""
     @State private var renaming: Bool = false
 
+    /// Drives the notes editor sheet. Presented OVER this picker, so the
+    /// picker stays underneath when the editor is dismissed (mirrors how
+    /// the contact picker works).
+    @State private var showingNotesEditor: Bool = false
+
     /// True when this row is eligible for a contact pin. Any UPI flow
     /// from a bank account — inbound OR outbound — whose VPA isn't a
     /// merchant Q-code. A ₹1 inbound from Bivek and a ₹1 outbound to
@@ -48,14 +53,15 @@ struct CategoryPickerSheet: View {
     }
 
     /// Content-sized detent. header (~72) + 7 category rows (~48 each)
-    /// + rename row (~48 + divider) + optional pin row (~48 + divider)
-    /// + bottom cushion. Grows depending on which optional rows are
-    /// actually shown.
+    /// + rename row (~56 + divider) + notes row (~56 + divider) +
+    /// optional pin row (~64 + divider) + bottom cushion. Grows
+    /// depending on which optional rows are actually shown.
     private var sheetHeight: CGFloat {
         let base: CGFloat = 490
         let renameRow: CGFloat = 56 // always shown
+        let notesRow: CGFloat = 56  // always shown
         let pinRow: CGFloat = canPinContact ? 64 : 0
-        return base + renameRow + pinRow
+        return base + renameRow + notesRow + pinRow
     }
 
     var body: some View {
@@ -68,6 +74,8 @@ struct CategoryPickerSheet: View {
                 categoryList
                 Divider().opacity(0.4)
                 renameRow
+                Divider().opacity(0.4)
+                notesRow
                 if canPinContact {
                     Divider().opacity(0.4)
                     contactPinRow
@@ -93,6 +101,10 @@ struct CategoryPickerSheet: View {
             } else {
                 Text("applies to this transaction only — it has no VPA to propagate against.")
             }
+        }
+        .sheet(isPresented: $showingNotesEditor) {
+            NotesEditorSheet(transaction: transaction)
+                .environment(store)
         }
         .sheet(isPresented: $showingContactPicker) {
             ContactPickerSheet(
@@ -122,7 +134,7 @@ struct CategoryPickerSheet: View {
     @ViewBuilder
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("edit tag")
+            Text("edit details")
                 .font(.system(size: 11, weight: .semibold).smallCaps())
                 .foregroundStyle(AppColor.textTertiary)
             Text(transaction.displayMerchant)
@@ -134,7 +146,9 @@ struct CategoryPickerSheet: View {
             // the contact half when the row isn't pin-eligible (merchant
             // VPAs / credit card rows) so we don't promise affordances
             // that won't appear below.
-            Text(canPinContact ? "add contact · pick category" : "pick category")
+            Text(canPinContact
+                 ? "pick category · rename · notes · pin contact"
+                 : "pick category · rename · notes")
                 .font(AppFont.caption)
                 .foregroundStyle(AppColor.textTertiary)
         }
@@ -178,6 +192,34 @@ struct CategoryPickerSheet: View {
                 title: "rename merchant",
                 subtitle: transaction.vpa.map { "applies to \($0)" }
                     ?? "applies to this row only",
+                accessory: .chevron,
+                highlighted: true
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Opens the dedicated NotesEditorSheet stacked above this picker.
+    /// We use a separate sheet (not an inline expansion) because a
+    /// multi-line TextEditor needs more room than the picker can
+    /// afford without disrupting the rest of the rows.
+    ///
+    /// Subtitle previews the first ~60 chars of the existing note so
+    /// the user can tell whether one is already attached without
+    /// drilling in.
+    @ViewBuilder
+    private var notesRow: some View {
+        let existing = transaction.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let preview: String? = existing.isEmpty
+            ? nil
+            : String(existing.prefix(60)) + (existing.count > 60 ? "…" : "")
+        Button {
+            showingNotesEditor = true
+        } label: {
+            rowLayout(
+                icon: existing.isEmpty ? "square.and.pencil" : "note.text",
+                title: existing.isEmpty ? "add notes" : "edit notes",
+                subtitle: preview,
                 accessory: .chevron,
                 highlighted: true
             )

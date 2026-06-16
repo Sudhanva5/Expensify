@@ -31,16 +31,6 @@ struct TransactionDetailSheet: View {
     var contactImageData: Data? = nil
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(TransactionStore.self) private var store
-
-    /// Editable buffer for the notes editor. Initialised from the
-    /// transaction on appear; saved on commit (blur / Done button).
-    /// Kept separate from `transaction.notes` so users can edit + cancel
-    /// without rewriting the store row.
-    @State private var notesDraft: String = ""
-    @State private var notesOriginal: String = ""
-    @State private var notesSaving: Bool = false
-    @FocusState private var notesFocused: Bool
 
     private var hasMap: Bool { transaction.hasCoordinates }
 
@@ -61,12 +51,9 @@ struct TransactionDetailSheet: View {
             ? 240
             : (receipt != nil ? 140 : 0)
         let base: CGFloat = hasMap ? 380 : 140
-        // Notes editor adds ~160pts (80 input + section label + footnote).
-        // Always present, so always count it.
-        let notesHeight: CGFloat = 160
         // Use a fraction-style cap so very tall sheets still fit the
         // screen — the system will switch to a scrollable detent.
-        return min(base + receiptHeight + notesHeight, 760)
+        return min(base + receiptHeight, 700)
     }
 
     var body: some View {
@@ -89,7 +76,6 @@ struct TransactionDetailSheet: View {
                     if let receipt = transaction.receipt {
                         ReceiptCard(receipt: receipt)
                     }
-                    notesEditor
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
@@ -99,107 +85,6 @@ struct TransactionDetailSheet: View {
         .presentationDetents([.height(sheetHeight), .large])
         .presentationDragIndicator(.visible)
         .presentationBackground(AppColor.canvas)
-        .task {
-            // Seed the draft from the transaction once per appearance.
-            // Re-seeding on every body invocation would clobber in-progress
-            // typing, so we use `.task` (runs on appear, cancelled on
-            // dismiss) instead of `.onChange(of: transaction.notes)`.
-            notesDraft = transaction.notes ?? ""
-            notesOriginal = notesDraft
-        }
-    }
-
-    /// Notes editor — a TextEditor (multi-line) wrapped in a card with the
-    /// same hairline border as ReceiptCard. Save fires on:
-    ///   1. blur (focus leaves the field), AND
-    ///   2. explicit "save" button (only shown when the draft differs from
-    ///      the original — keeps the chrome quiet when nothing changed).
-    /// Saving optimistically updates the store row so the next time the
-    /// sheet renders the value is already there.
-    @ViewBuilder
-    private var notesEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("notes")
-                    .font(.system(size: 11, weight: .semibold).smallCaps())
-                    .foregroundStyle(AppColor.textTertiary)
-                Spacer()
-                if notesSaving {
-                    ProgressView().controlSize(.small)
-                } else if notesDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                    != notesOriginal.trimmingCharacters(in: .whitespacesAndNewlines)
-                {
-                    Button("save") { Task { await saveNotes() } }
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(AppColor.tap)
-                        .buttonStyle(.plain)
-                }
-            }
-
-            // TextEditor doesn't have a placeholder — overlay a ghost
-            // string when empty so the field doesn't read as broken.
-            ZStack(alignment: .topLeading) {
-                if notesDraft.isEmpty && !notesFocused {
-                    Text("e.g. 'ETF rebalance — keep for taxes' or 'paid Anita back for dinner'")
-                        .font(.system(size: 14))
-                        .foregroundStyle(AppColor.textTertiary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .allowsHitTesting(false)
-                }
-                TextEditor(text: $notesDraft)
-                    .focused($notesFocused)
-                    .font(.system(size: 14))
-                    .foregroundStyle(AppColor.textPrimary)
-                    .scrollContentBackground(.hidden)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .frame(minHeight: 80, maxHeight: 200)
-            }
-            .background(AppColor.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(AppColor.hairline, lineWidth: 0.5)
-            )
-            .onChange(of: notesFocused) { _, newFocused in
-                // Auto-save on blur — but only if something actually
-                // changed. Avoid spurious PATCH requests when the user
-                // taps the field, scrolls, and dismisses.
-                if !newFocused {
-                    let trimmed = notesDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let originalTrimmed = notesOriginal.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if trimmed != originalTrimmed {
-                        Task { await saveNotes() }
-                    }
-                }
-            }
-
-            Text("private to you. surfaced to claude via mcp so spend questions can reference what you wrote.")
-                .font(AppFont.caption)
-                .foregroundStyle(AppColor.textTertiary)
-        }
-    }
-
-    private func saveNotes() async {
-        let trimmed = notesDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        notesSaving = true
-        defer { notesSaving = false }
-        do {
-            try await APIClient.shared.updateNotes(
-                transactionId: transaction.id,
-                notes: trimmed
-            )
-            notesOriginal = trimmed
-            notesDraft = trimmed
-            // Refresh the store so the next render of any view that holds
-            // this transaction sees the new value too.
-            await store.refresh()
-        } catch {
-            // Surface the error inline with the save button — keep the
-            // draft so the user can retry without re-typing.
-            print("[notes] save failed:", error.localizedDescription)
-        }
     }
 
     @ViewBuilder
