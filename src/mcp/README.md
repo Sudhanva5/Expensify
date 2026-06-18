@@ -13,6 +13,7 @@ Remote MCP server that exposes the Expense Solver Postgres database to Claude (D
 | Spend | `search_merchant` | fuzzy search merchantNormalized + merchantRaw + vpa; optional `include` |
 | Detail | `get_transaction` | single row with all joins: receipts, places, location, fx, email |
 | Detail | `recent_receipts` | Swiggy / MMT / redBus receipts with full items + fees + meta |
+| Detail | `get_account_balances` | latest known balance per account, parsed from HDFC "Account update" emails |
 | Detail | `list_instruments` | distinct accounts + cards seen, with usage counts |
 | Detail | `list_tags` | user-created tags + usage counts |
 | Detail | `list_goals` | savings goals — name, target, deadline |

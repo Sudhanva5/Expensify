@@ -170,6 +170,35 @@ export function registerDetailTools(server: McpServer): void {
   );
 
   server.registerTool(
+    'get_account_balances',
+    {
+      title: 'Latest known account balance(s)',
+      description:
+        'Returns every known account balance, freshest asOf first. Parsed from HDFC InstaAlert "Account update" emails ("The available balance in your account ending XXNNNN is Rs. INR X as of DD-MMM-YY"). One row per instrument; updates when a new balance email lands. Use for "how much do I have right now?" questions.',
+      inputSchema: {},
+    },
+    async () => {
+      const rows = await prisma.accountBalance.findMany({
+        orderBy: { asOf: 'desc' },
+      });
+      return {
+        content: [
+          asJsonText({
+            count: rows.length,
+            balances: rows.map((r) => ({
+              instrument: r.instrument,
+              balanceInr: Number(r.balanceInrMinor) / 100,
+              asOf: r.asOf.toISOString(),
+              source: r.source,
+              updatedAt: r.updatedAt.toISOString(),
+            })),
+          }),
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
     'list_instruments',
     {
       title: 'Distinct accounts + cards seen in transactions',
