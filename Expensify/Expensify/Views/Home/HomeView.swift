@@ -126,8 +126,9 @@ struct HomeView: View {
             .listSectionSpacing(.compact)
 
             // Date filter — visually glued to the transaction list
-            // below. Tight bottom inset so the first month section
-            // sits right under the filter pill.
+            // below. Section spacing forced to 0 (the .compact preset
+            // still left a visible gap) so the filter pill and the
+            // first month-section header read as one block.
             Section {
                 HStack {
                     DateRangeFilter(range: $range)
@@ -135,9 +136,9 @@ struct HomeView: View {
                 }
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 2, trailing: 20))
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
             }
-            .listSectionSpacing(.compact)
+            .listSectionSpacing(0)
 
             // States
             if store.isLoading && store.transactions.isEmpty {
@@ -179,11 +180,17 @@ struct HomeView: View {
                                 }
                         }
                     } header: {
+                        // Tight padding above the month-section header
+                        // so the date-filter pill above and the rows
+                        // below read as ONE group, not three.
+                        // Applies to every month transition during
+                        // scroll too — general principle: the filter
+                        // and the list are conceptually the same beat.
                         monthSectionHeader(section)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 20)
-                            .padding(.top, 14)
-                            .padding(.bottom, 8)
+                            .padding(.top, 4)
+                            .padding(.bottom, 4)
                             .listRowInsets(EdgeInsets())
                     }
                 }
