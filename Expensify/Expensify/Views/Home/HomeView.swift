@@ -20,11 +20,10 @@ struct HomeView: View {
     /// conflict with per-row sheet state.
     @State private var editingTagFor: Transaction? = nil
     /// Latest known account balance(s). Loaded on appear + on user-tap
-    /// of the refresh button. nil while pending so the card renders
+    /// of the refresh button. Empty while pending so the card renders
     /// a placeholder instead of "₹0.00" zero-state.
     @State private var accountBalances: [AccountBalance] = []
     @State private var balanceLoading: Bool = false
-    @State private var balanceLastChecked: Date?
 
     private var dateScoped: [Transaction] {
         store.transactions.filter { range.contains($0.occurredAt) }
@@ -96,7 +95,9 @@ struct HomeView: View {
 
     private var content: some View {
         List {
-            // Title block
+            // Title block — tight bottom inset so the balance card sits
+            // close beneath the greeting (the card itself acts as the
+            // "first content beat" of the screen).
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("transactions")
@@ -109,20 +110,25 @@ struct HomeView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 6, trailing: 20))
+                .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 0, trailing: 20))
             }
+            .listSectionSpacing(.compact)
 
-            // Balance card — always present (placeholder when no
-            // balance email has been parsed yet) so the chrome stays
-            // stable across loads.
+            // Balance card — sits between the greeting and the date
+            // filter. Tight top/bottom insets so the card visually
+            // belongs to the same "header block" instead of floating
+            // in a sea of whitespace.
             Section {
                 balanceCard
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
             }
+            .listSectionSpacing(.compact)
 
-            // Date filter
+            // Date filter — sits between the balance card and the
+            // first month section. Tight top inset so it nests just
+            // beneath the card.
             Section {
                 HStack {
                     DateRangeFilter(range: $range)
@@ -130,8 +136,9 @@ struct HomeView: View {
                 }
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
+                .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
             }
+            .listSectionSpacing(.compact)
 
             // States
             if store.isLoading && store.transactions.isEmpty {
@@ -186,23 +193,26 @@ struct HomeView: View {
         }
     }
 
-    /// Account-balance card. The freshest row HDFC emailed about + a
-    /// refresh button. Card stays in place even when there's no
-    /// balance yet (placeholder text) so the chrome doesn't jump
-    /// around between empty and populated states.
-    ///
-    /// Tapping refresh re-queries the backend — which returns
-    /// whatever HDFC's last "Account update" email said. There's no
-    /// way to force HDFC to email a fresh balance on demand, so this
-    /// is a sync-from-server affordance, not a sync-from-bank one.
+    /// Account-balance card. HDFC badge + bank label, then the balance,
+    /// then a small "as of <date>" caption. Refresh icon top-right
+    /// re-queries the backend (which returns whatever HDFC's last
+    /// "Account update" email said — there's no way to force HDFC to
+    /// email a fresh balance on demand).
     @ViewBuilder
     private var balanceCard: some View {
         let primary = accountBalances.first
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(primary.map { "account ending \($0.lastFour)" } ?? "account balance")
-                    .font(.system(size: 11, weight: .semibold).smallCaps())
-                    .foregroundStyle(AppColor.textTertiary)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                hdfcBadge
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("HDFC Bank")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppColor.textPrimary)
+                    Text(primary.map { "account ending \($0.lastFour)" }
+                         ?? "account balance")
+                        .font(.system(size: 10))
+                        .foregroundStyle(AppColor.textTertiary)
+                }
                 Spacer()
                 Button {
                     Task { await refreshBalances() }
@@ -219,14 +229,11 @@ struct HomeView: View {
                 .accessibilityLabel("Refresh balance")
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(formatRupees(primary?.balanceInr))
-                    .font(.system(size: 28, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(AppColor.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Spacer()
-            }
+            Text(formatRupees(primary?.balanceInr))
+                .font(.system(size: 30, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(AppColor.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
 
             Text(asOfText)
                 .font(.system(size: 11))
@@ -243,19 +250,28 @@ struct HomeView: View {
         )
     }
 
+    /// Stylized HDFC monogram — small red rounded square with white
+    /// "HDFC" text. Recognizable without bundling the actual logo
+    /// asset (and steers clear of trademark concerns of using their
+    /// PNG directly). Matches the 32pt avatar size of the rest of the
+    /// app so the card header looks at home next to TransactionRow.
+    @ViewBuilder
+    private var hdfcBadge: some View {
+        Text("HDFC")
+            .font(.system(size: 8, weight: .heavy))
+            .foregroundStyle(.white)
+            .frame(width: 32, height: 32)
+            .background(Color(red: 0.93, green: 0.14, blue: 0.16))
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+
     private var asOfText: String {
         guard let p = accountBalances.first else {
             return "no balance email parsed yet"
         }
         let df = DateFormatter()
         df.dateFormat = "d MMM ''yy"
-        let on = df.string(from: p.asOf).lowercased()
-        if let checked = balanceLastChecked {
-            let rel = RelativeDateTimeFormatter()
-            rel.unitsStyle = .short
-            return "as of \(on) · refreshed \(rel.localizedString(for: checked, relativeTo: Date()))"
-        }
-        return "as of \(on)"
+        return "as of \(df.string(from: p.asOf).lowercased())"
     }
 
     private func formatRupees(_ amount: Decimal?) -> String {
@@ -276,7 +292,6 @@ struct HomeView: View {
         defer { balanceLoading = false }
         do {
             accountBalances = try await APIClient.shared.fetchAccountBalances()
-            balanceLastChecked = Date()
         } catch {
             // Silent fail — chrome stays put, no banner. iOS already
             // surfaces broader connectivity issues via the existing

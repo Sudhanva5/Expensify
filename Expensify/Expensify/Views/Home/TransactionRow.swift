@@ -85,17 +85,29 @@ struct TransactionRow: View {
         }
     }
 
-    /// Category line. The whole row is tappable now (opens the detail
-    /// sheet), so we no longer carry a "more details" affordance here.
-    /// Earlier the chip was the only entry point into the sheet —
-    /// effectively gating notes / map / receipt access on the row
-    /// having coords or a receipt, which left plain rows unreachable.
+    /// Category line + "more details" hint chip. The hint is purely
+    /// visual — the whole row is tappable via .onTapGesture and the
+    /// chip's parent inherits that. Earlier the chip was the only
+    /// entry into the detail sheet AND was gated on
+    /// `hasCoordinates || receipt || placesSuggestions` — so plain
+    /// rows had no way in. Now the chip just signals "tap to see
+    /// more"; tapping anywhere on the row opens the sheet.
     @ViewBuilder
     private var metaLine: some View {
         HStack(spacing: 6) {
             Text(categoryText)
                 .font(.system(size: 13))
                 .foregroundStyle(AppColor.textSecondary)
+
+            Text("more details")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(AppColor.tap)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(AppColor.tap.opacity(0.08))
+                .clipShape(Capsule())
+                .allowsHitTesting(false)
+
             Spacer(minLength: 0)
         }
     }
