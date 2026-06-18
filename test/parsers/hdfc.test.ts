@@ -268,6 +268,44 @@ describe('HDFC parser — Template E v2: RuPay CC UPI debit (May 2026 format)', 
   });
 });
 
+describe('HDFC parser — Template F: cc_thanks ("Thank you for using ...")', () => {
+  it('parses the RAZ*Swiggy ₹354 alert on card ending 3328', () => {
+    const result = parseHdfcEmail({
+      subject: 'We noticed a transaction on your Credit Card',
+      body: loadFixture('cc-thanks-swiggy.txt'),
+      receivedAt: new Date('2026-06-17T15:43:00Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.template).toBe('cc_thanks');
+    expect(result.data.direction).toBe('out');
+    expect(result.data.instrument).toBe('card_3328');
+    expect(result.data.amountMinor).toBe(35400n); // ₹354.00
+    expect(result.data.merchantRaw).toBe('RAZ*Swiggy');
+    expect(result.data.vpa).toBeNull();
+    expect(result.data.externalRef).toBe('036180'); // Authorization code
+    expect(result.data.isAutopay).toBe(false);
+    // 17-06-2026 21:12:59 IST → 15:42:59 UTC
+    expect(result.data.occurredAt.toISOString()).toBe('2026-06-17T15:42:59.000Z');
+  });
+
+  it('does NOT match cc_debit / cc_upi_debit / cc_upi_debit_v2 emails', () => {
+    // Negative control — the cc_debit fixture should never come back as
+    // cc_thanks because its marker phrase is different ("has been
+    // debited" vs "Thank you for using").
+    const result = parseHdfcEmail({
+      subject: 'Alert: You have used your HDFC Bank Card',
+      body: loadFixture('cc-debit-bundl.txt'),
+      receivedAt: new Date('2026-05-10T08:00:00Z'),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.template).toBe('cc_debit');
+  });
+});
+
 describe('HDFC parser — upcoming-autopay preview is recognized and skipped', () => {
   it('returns not_a_transaction for the heads-up email', () => {
     const result = parseHdfcEmail({

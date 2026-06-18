@@ -37,6 +37,24 @@ export function parseDdMmYyyy(s: string, receivedAt: Date): Date {
   return istClockToUtc(Number(m[3]), Number(m[2]) - 1, Number(m[1]), receivedAt);
 }
 
+// "17-06-2026 21:12:59" (DD-MM-YYYY HH:MM:SS, hyphen-separated date).
+// Used by the cc_thanks template ("Thank you for using your HDFC Bank
+// Credit Card ending in ..."). Combined date+time string so a single
+// parser is simpler than two regex captures + two-arg call site.
+export function parseDdMmYyyyHms(s: string): Date {
+  const m =
+    /^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/.exec(s.trim());
+  if (!m) throw new Error(`bad date (DD-MM-YYYY HH:MM:SS): ${s}`);
+  return zonedToUtc(
+    Number(m[3]),
+    Number(m[2]) - 1,
+    Number(m[1]),
+    Number(m[4]),
+    Number(m[5]),
+    Number(m[6]),
+  );
+}
+
 // "17 May, 2026" (no time). Inherits hh:mm:ss from receivedAt like
 // parseDdMmYy does. Used by the new (May 2026) HDFC CC-UPI debit
 // template which dropped the explicit time field.

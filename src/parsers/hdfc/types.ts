@@ -6,7 +6,8 @@ export type EmailTemplate =
   | 'cc_autopay'
   | 'upi_debit'
   | 'cc_upi_debit'
-  | 'cc_upi_debit_v2';
+  | 'cc_upi_debit_v2'
+  | 'cc_thanks';
 
 export type Direction = 'in' | 'out';
 

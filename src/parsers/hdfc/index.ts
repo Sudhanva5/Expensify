@@ -4,6 +4,7 @@
 import * as ccAutopay from './templates/cc-autopay.js';
 import * as ccAutopayUpcoming from './templates/cc-autopay-upcoming.js';
 import * as ccDebit from './templates/cc-debit.js';
+import * as ccThanks from './templates/cc-thanks.js';
 import * as ccUpiDebit from './templates/cc-upi-debit.js';
 import * as ccUpiDebitV2 from './templates/cc-upi-debit-v2.js';
 import * as upiCredit from './templates/upi-credit.js';
@@ -17,9 +18,13 @@ import { PARSER_VERSION } from './types.js';
 //   cc_upi_debit/v2 must precede cc_debit (both contain "Credit Card")
 //   v2 first so the May-2026 "is debited" wording wins over the older
 //   "has been debited" matcher when both would technically match.
+//   cc_thanks ("Thank you for using your HDFC Bank Credit Card") has
+//   a distinctive marker, so its order vs the other CC templates
+//   doesn't matter — placed before the cc-debit variants for grouping.
 const TEMPLATES: TemplateParser[] = [
   ccAutopayUpcoming.tryParse,
   ccAutopay.tryParse,
+  ccThanks.tryParse,
   ccUpiDebitV2.tryParse,
   ccUpiDebit.tryParse,
   ccDebit.tryParse,
