@@ -95,9 +95,8 @@ struct HomeView: View {
 
     private var content: some View {
         List {
-            // Title block — tight bottom inset so the balance card sits
-            // close beneath the greeting (the card itself acts as the
-            // "first content beat" of the screen).
+            // Header block — page title + greeting at the top of the
+            // screen, no decoration around it.
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("transactions")
@@ -114,21 +113,21 @@ struct HomeView: View {
             }
             .listSectionSpacing(.compact)
 
-            // Balance card — sits between the greeting and the date
-            // filter. Tight top/bottom insets so the card visually
-            // belongs to the same "header block" instead of floating
-            // in a sea of whitespace.
+            // Balance card — sits in the middle with breathing room
+            // ABOVE (separates it from the header) AND BELOW (so it
+            // reads as its own beat rather than running into the
+            // transaction list).
             Section {
                 balanceCard
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 18, trailing: 16))
             }
             .listSectionSpacing(.compact)
 
-            // Date filter — sits between the balance card and the
-            // first month section. Tight top inset so it nests just
-            // beneath the card.
+            // Date filter — visually glued to the transaction list
+            // below. Tight bottom inset so the first month section
+            // sits right under the filter pill.
             Section {
                 HStack {
                     DateRangeFilter(range: $range)
@@ -136,7 +135,7 @@ struct HomeView: View {
                 }
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 2, trailing: 20))
             }
             .listSectionSpacing(.compact)
 
@@ -250,19 +249,32 @@ struct HomeView: View {
         )
     }
 
-    /// Stylized HDFC monogram — small red rounded square with white
-    /// "HDFC" text. Recognizable without bundling the actual logo
-    /// asset (and steers clear of trademark concerns of using their
-    /// PNG directly). Matches the 32pt avatar size of the rest of the
-    /// app so the card header looks at home next to TransactionRow.
+    /// HDFC logo — fetched via Google's favicon service so we get the
+    /// real bank logo without bundling a PNG ourselves. AsyncImage
+    /// caches automatically; while loading or on failure we fall
+    /// back to the stylized "HDFC" red monogram so the slot is
+    /// never empty.
     @ViewBuilder
     private var hdfcBadge: some View {
-        Text("HDFC")
-            .font(.system(size: 8, weight: .heavy))
-            .foregroundStyle(.white)
-            .frame(width: 32, height: 32)
-            .background(Color(red: 0.93, green: 0.14, blue: 0.16))
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        let url = URL(string: "https://www.google.com/s2/favicons?domain=hdfcbank.com&sz=128")
+        AsyncImage(url: url, transaction: .init(animation: .easeOut(duration: 0.18))) { phase in
+            switch phase {
+            case .success(let img):
+                img
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 32, height: 32)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            default:
+                Text("HDFC")
+                    .font(.system(size: 8, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(Color(red: 0.93, green: 0.14, blue: 0.16))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+        }
     }
 
     private var asOfText: String {
