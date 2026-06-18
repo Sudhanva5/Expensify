@@ -95,23 +95,16 @@ struct HomeView: View {
 
     private var content: some View {
         List {
-            // Header block — page title + greeting at the top of the
-            // screen, no decoration around it.
+            // Hero block — edge-to-edge gradient + star field with the
+            // greeting overlaid. Replaces the flat title+greeting block;
+            // sets a tone before any data lands.
             Section {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("transactions")
-                        .font(AppFont.pageTitle)
-                        .foregroundStyle(AppColor.textPrimary)
-                    Text(greeting)
-                        .font(AppFont.rowSubtitle)
-                        .foregroundStyle(AppColor.textSecondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 0, trailing: 20))
+                HeroSection(greeting: greeting, inlineCount: filtered.count)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
             }
-            .listSectionSpacing(.compact)
+            .listSectionSpacing(0)
 
             // Balance card — sits in the middle with breathing room
             // ABOVE (separates it from the header) AND BELOW (so it
@@ -427,14 +420,36 @@ struct HomeView: View {
         return "₹" + (f.string(from: n) ?? "\(amount)")
     }
 
+    /// Voice-driven greeting line for the hero. Time-of-day prefix +
+    /// punchy data tail. When the user hasn't spent today, leans into
+    /// the negative space ("nothing yet, enjoy it") rather than
+    /// padding with filler. Inspired by Railway's "Zero notifications.
+    /// Close the app, touch grass." energy.
     private var greeting: String {
         let hour = Calendar.current.component(.hour, from: Date())
+        let timeOfDay: String
         switch hour {
-        case 4..<12: return "good morning. here's where your money went."
-        case 12..<17: return "good afternoon. here's where your money went."
-        case 17..<22: return "good evening. here's where your money went."
-        default: return "late night. here's where your money went."
+        case 4..<12: timeOfDay = "good morning"
+        case 12..<17: timeOfDay = "good afternoon"
+        case 17..<22: timeOfDay = "good evening"
+        default: timeOfDay = "burning the midnight oil"
         }
+
+        let cal = Calendar.current
+        let todaysOutflow = store.transactions
+            .filter { cal.isDateInToday($0.occurredAt) && $0.direction == .out }
+            .reduce(Decimal(0)) { $0 + $1.amountInr }
+
+        if todaysOutflow == 0 {
+            return "\(timeOfDay). nothing spent yet. enjoy it."
+        }
+
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        f.locale = Locale(identifier: "en_IN")
+        let amount = f.string(from: NSDecimalNumber(decimal: todaysOutflow)) ?? "0"
+        return "\(timeOfDay). ₹\(amount) down today."
     }
 }
 
