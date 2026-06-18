@@ -67,8 +67,10 @@ struct TransactionRow: View {
             VStack(alignment: .trailing, spacing: 4) {
                 AmountText(amount: transaction.amountInr, direction: transaction.direction)
                 Text(dateString)
-                    .font(.system(size: 11))
+                    .font(.system(size: 11).monospacedDigit())
                     .foregroundStyle(AppColor.textTertiary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
         }
         .padding(.vertical, 8)
@@ -168,11 +170,26 @@ struct TransactionRow: View {
         return transaction.category?.shortName.lowercased() ?? "uncategorized"
     }
 
-    /// Compact date — "9 May '26".
+    /// Compact date+time — "11th jul | 11:30 am". Drops the year (the
+    /// detail sheet has the full timestamp); adds the time so the user
+    /// can disambiguate two same-day spends at a glance. Ordinal day
+    /// ("11th", "1st", "2nd") matches the Cred-style cadence.
     private var dateString: String {
-        let df = DateFormatter()
-        df.dateFormat = "d MMM ''yy"
-        return df.string(from: transaction.occurredAt).lowercased()
+        let date = transaction.occurredAt
+        let ordinal = NumberFormatter()
+        ordinal.numberStyle = .ordinal
+        let day = Calendar.current.component(.day, from: date)
+        let dayStr = ordinal.string(from: NSNumber(value: day)) ?? "\(day)"
+
+        let monthDf = DateFormatter()
+        monthDf.dateFormat = "MMM"
+        let month = monthDf.string(from: date).lowercased()
+
+        let timeDf = DateFormatter()
+        timeDf.dateFormat = "h:mm a"
+        let time = timeDf.string(from: date).lowercased()
+
+        return "\(dayStr) \(month) | \(time)"
     }
 }
 
