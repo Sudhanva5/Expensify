@@ -573,6 +573,41 @@ actor APIClient {
         )
     }
 
+    // MARK: - Account balance
+    //
+    // HDFC emails periodic "available balance in your account ending
+    // XX5264 is Rs. INR X" alerts; the backend parses these and stores
+    // one row per instrument in AccountBalance. The home screen pulls
+    // this on appear + on user-triggered refresh.
+
+    func fetchAccountBalances() async throws -> [AccountBalance] {
+        struct Wire: Decodable {
+            let balances: [Row]
+            struct Row: Decodable {
+                let instrument: String
+                let balanceInrMinor: Int64
+                let asOf: String
+                let source: String
+                let updatedAt: String
+            }
+        }
+        let wire: Wire = try await getJSON(path: "/account-balance/")
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoNoFrac = ISO8601DateFormatter()
+        let parse: (String) -> Date = { s in
+            iso.date(from: s) ?? isoNoFrac.date(from: s) ?? Date()
+        }
+        return wire.balances.map { r in
+            AccountBalance(
+                instrument: r.instrument,
+                balanceInr: Decimal(r.balanceInrMinor) / 100,
+                asOf: parse(r.asOf),
+                updatedAt: parse(r.updatedAt)
+            )
+        }
+    }
+
     // MARK: - MCP diagnostics
     //
     // Read-only inspection + revoke surface for OAuth-issued bearers on the

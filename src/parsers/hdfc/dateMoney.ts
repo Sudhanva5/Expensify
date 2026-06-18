@@ -8,6 +8,16 @@ const MONTHS: Record<string, number> = {
   Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
 };
 
+/// Case-insensitive month lookup — "JUN", "Jun", and "jun" all resolve.
+/// Returns null on unknown month rather than throwing, so callers can
+/// emit better error messages.
+function findMonth(s: string): number | null {
+  if (s.length !== 3) return null;
+  const cap = s.charAt(0).toUpperCase() + s.slice(1, 3).toLowerCase();
+  const m = MONTHS[cap];
+  return m === undefined ? null : m;
+}
+
 // "5,000.00" → 500000n (paise / cents — caller knows the currency)
 // "94"       → 9400n
 // "94.5"     → 9450n
@@ -35,6 +45,19 @@ export function parseDdMmYyyy(s: string, receivedAt: Date): Date {
   const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
   if (!m) throw new Error(`bad date (DD/MM/YYYY): ${s}`);
   return istClockToUtc(Number(m[3]), Number(m[2]) - 1, Number(m[1]), receivedAt);
+}
+
+// "17-JUN-26" (DD-MMM-YY, uppercase 3-letter month, 2-digit year). Used
+// by the HDFC balance update email ("as of 17-JUN-26"). Inherits the
+// hh:mm:ss from receivedAt — the email reports a calendar date with no
+// time component, but we want the row's `asOf` to sort correctly
+// alongside transaction occurredAt values that DO carry time.
+export function parseDdMmmYy(s: string, receivedAt: Date): Date {
+  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{2})$/.exec(s.trim());
+  if (!m) throw new Error(`bad date (DD-MMM-YY): ${s}`);
+  const month = findMonth(m[2]!);
+  if (month === null) throw new Error(`bad month: ${m[2]}`);
+  return istClockToUtc(2000 + Number(m[3]), month, Number(m[1]), receivedAt);
 }
 
 // "17-06-2026 21:12:59" (DD-MM-YYYY HH:MM:SS, hyphen-separated date).

@@ -279,6 +279,35 @@ model EmailMessage {
   receivedAt     DateTime  @default(now())
 }
 
+// Latest known balance per instrument, populated from HDFC's "Account
+// update" InstaAlert emails (Subject: "View: Account update for your
+// HDFC Bank A/c", body contains "The available balance in your account
+// ending XXNNNN is Rs. INR <X> as of DD-MMM-YY."). One row per
+// instrument; the row UPDATES on every new email so iOS always sees
+// the freshest balance HDFC has emailed about.
+//
+// `gmailMessageId` is unique for idempotency — replays / duplicate
+// Pub/Sub deliveries don't double-write.
+model AccountBalance {
+  id              String   @id @default(cuid())
+  /// Matches Transaction.instrument shape ("account_5264", "card_3328").
+  /// Currently only HDFC savings accounts emit balance emails so this
+  /// will be account_* in practice, but the column shape leaves room
+  /// for future card-limit emails too.
+  instrument      String   @unique
+  balanceInrMinor BigInt
+  /// The date HDFC reports as "as of" in the body. Often a calendar
+  /// day, not a real-time timestamp.
+  asOf            DateTime
+  source          String   @default("hdfc_balance_email")
+  /// Gmail message id of the email this balance came from. Lets us
+  /// replay / dedupe.
+  gmailMessageId  String?  @unique
+  updatedAt       DateTime @updatedAt
+
+  @@index([asOf])
+}
+
 // ============================================================
 // Receipts (Swiggy / Amazon / Uber / etc.)
 // ============================================================

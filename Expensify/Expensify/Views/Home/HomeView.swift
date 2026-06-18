@@ -19,6 +19,12 @@ struct HomeView: View {
     /// Held at the parent so a swipe action across multiple rows doesn't
     /// conflict with per-row sheet state.
     @State private var editingTagFor: Transaction? = nil
+    /// Latest known account balance(s). Loaded on appear + on user-tap
+    /// of the refresh button. nil while pending so the card renders
+    /// a placeholder instead of "₹0.00" zero-state.
+    @State private var accountBalances: [AccountBalance] = []
+    @State private var balanceLoading: Bool = false
+    @State private var balanceLastChecked: Date?
 
     private var dateScoped: [Transaction] {
         store.transactions.filter { range.contains($0.occurredAt) }
@@ -46,9 +52,13 @@ struct HomeView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .background(AppColor.canvas)
-                .refreshable { await store.refresh() }
+                .refreshable {
+                    await store.refresh()
+                    await refreshBalances()
+                }
                 .task {
                     if store.transactions.isEmpty { await store.refresh() }
+                    if accountBalances.isEmpty { await refreshBalances() }
                 }
                 .connectivityBanner(store: store)
                 // Dock as a bottom safe-area inset, NOT a ZStack overlay.
@@ -100,6 +110,16 @@ struct HomeView: View {
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 6, trailing: 20))
+            }
+
+            // Balance card — always present (placeholder when no
+            // balance email has been parsed yet) so the chrome stays
+            // stable across loads.
+            Section {
+                balanceCard
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
             }
 
             // Date filter
@@ -163,6 +183,104 @@ struct HomeView: View {
                 }
 
             }
+        }
+    }
+
+    /// Account-balance card. The freshest row HDFC emailed about + a
+    /// refresh button. Card stays in place even when there's no
+    /// balance yet (placeholder text) so the chrome doesn't jump
+    /// around between empty and populated states.
+    ///
+    /// Tapping refresh re-queries the backend — which returns
+    /// whatever HDFC's last "Account update" email said. There's no
+    /// way to force HDFC to email a fresh balance on demand, so this
+    /// is a sync-from-server affordance, not a sync-from-bank one.
+    @ViewBuilder
+    private var balanceCard: some View {
+        let primary = accountBalances.first
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(primary.map { "account ending \($0.lastFour)" } ?? "account balance")
+                    .font(.system(size: 11, weight: .semibold).smallCaps())
+                    .foregroundStyle(AppColor.textTertiary)
+                Spacer()
+                Button {
+                    Task { await refreshBalances() }
+                } label: {
+                    if balanceLoading {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AppColor.tap)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Refresh balance")
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(formatRupees(primary?.balanceInr))
+                    .font(.system(size: 28, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(AppColor.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Spacer()
+            }
+
+            Text(asOfText)
+                .font(.system(size: 11))
+                .foregroundStyle(AppColor.textTertiary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppColor.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(AppColor.hairline, lineWidth: 0.5)
+        )
+    }
+
+    private var asOfText: String {
+        guard let p = accountBalances.first else {
+            return "no balance email parsed yet"
+        }
+        let df = DateFormatter()
+        df.dateFormat = "d MMM ''yy"
+        let on = df.string(from: p.asOf).lowercased()
+        if let checked = balanceLastChecked {
+            let rel = RelativeDateTimeFormatter()
+            rel.unitsStyle = .short
+            return "as of \(on) · refreshed \(rel.localizedString(for: checked, relativeTo: Date()))"
+        }
+        return "as of \(on)"
+    }
+
+    private func formatRupees(_ amount: Decimal?) -> String {
+        guard let amount else { return "—" }
+        let value = NSDecimalNumber(decimal: amount).doubleValue
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = "INR"
+        f.currencySymbol = "₹"
+        f.maximumFractionDigits = 2
+        f.minimumFractionDigits = 2
+        f.locale = Locale(identifier: "en_IN")
+        return f.string(from: NSNumber(value: value)) ?? "₹\(value)"
+    }
+
+    private func refreshBalances() async {
+        balanceLoading = true
+        defer { balanceLoading = false }
+        do {
+            accountBalances = try await APIClient.shared.fetchAccountBalances()
+            balanceLastChecked = Date()
+        } catch {
+            // Silent fail — chrome stays put, no banner. iOS already
+            // surfaces broader connectivity issues via the existing
+            // .connectivityBanner modifier.
         }
     }
 

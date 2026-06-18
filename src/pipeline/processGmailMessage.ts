@@ -5,8 +5,10 @@
 import type { ExtractedMessage } from '../gmail/messageBody.js';
 import { isLikelyHdfcAlert } from '../gmail/messageBody.js';
 import { parseHdfcEmail } from '../parsers/hdfc/index.js';
+import { parseHdfcBalance } from '../parsers/hdfc/balance.js';
 import { categorize } from '../categorize/index.js';
 import { upsertTransaction } from '../db/transactions.js';
+import { upsertAccountBalance } from '../db/accountBalances.js';
 import { recordEmailMessage } from '../db/emailMessages.js';
 import { prisma } from '../db/client.js';
 import type { CategorizeContext, Enrichment } from '../categorize/types.js';
@@ -25,6 +27,13 @@ export type ProcessOutcome =
       kind: 'skipped_not_transaction';
       gmailMessageId: string;
       details: string;
+    }
+  | {
+      kind: 'balance_updated';
+      gmailMessageId: string;
+      instrument: string;
+      balanceInr: number;
+      asOf: string;
     }
   | {
       kind: 'parse_failed';
@@ -124,6 +133,37 @@ export async function processGmailMessage(
       kind: 'skipped_non_hdfc',
       gmailMessageId: msg.id,
       fromAddress: msg.fromAddress,
+    };
+  }
+
+  // Balance update emails are HDFC InstaAlerts but NOT transactions —
+  // they carry the account's current available balance. Run the
+  // balance parser first; if it hits, we skip the transaction
+  // pipeline entirely. The parser is cheap (one regex) and bailing
+  // here avoids the transaction-parser cascade returning
+  // no_template_match → parser-miss alert for a perfectly-recognized
+  // email shape.
+  const balance = parseHdfcBalance(msg.body, msg.receivedAt);
+  if (balance) {
+    await recordEmailMessage({
+      gmailMessageId: msg.id,
+      kind: 'hdfc_balance',
+      parserVersion: balance.parserVersion,
+      rawSubject: msg.subject,
+      rawSnippet: msg.snippet || msg.body.slice(0, 200),
+    });
+    await upsertAccountBalance({
+      instrument: balance.instrument,
+      balanceInrMinor: balance.balanceInrMinor,
+      asOf: balance.asOf,
+      gmailMessageId: msg.id,
+    });
+    return {
+      kind: 'balance_updated',
+      gmailMessageId: msg.id,
+      instrument: balance.instrument,
+      balanceInr: Number(balance.balanceInrMinor) / 100,
+      asOf: balance.asOf.toISOString(),
     };
   }
 
