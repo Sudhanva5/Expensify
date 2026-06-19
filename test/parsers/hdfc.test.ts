@@ -268,6 +268,29 @@ describe('HDFC parser — Template E v2: RuPay CC UPI debit (May 2026 format)', 
   });
 });
 
+describe('HDFC parser — Template E v3: RuPay CC UPI debit (June 2026 reword)', () => {
+  it('parses the "We\'re sharing this alert" / "Paid to" / "Date:" wording', () => {
+    const result = parseHdfcEmail({
+      subject: '❗  You have done a UPI txn. Check details!',
+      body: loadFixture('cc-upi-debit-v3-paytm.txt'),
+      receivedAt: new Date('2026-06-19T16:12:00Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.template).toBe('cc_upi_debit_v3');
+    expect(result.data.direction).toBe('out');
+    expect(result.data.instrument).toBe('card_2668');
+    expect(result.data.amountMinor).toBe(11000n); // ₹110.00
+    expect(result.data.vpa).toBe('paytm-80132274@ptys');
+    // No payee name in this format — parser falls back to the VPA's local-part.
+    expect(result.data.merchantRaw).toBe('paytm-80132274');
+    expect(result.data.externalRef).toBe('125005046968');
+    expect(result.data.isAutopay).toBe(false);
+  });
+});
+
 describe('HDFC parser — Template F: cc_thanks ("Thank you for using ...")', () => {
   it('parses the RAZ*Swiggy ₹354 alert on card ending 3328', () => {
     const result = parseHdfcEmail({
