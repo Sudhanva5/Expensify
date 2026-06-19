@@ -1,0 +1,28 @@
+Dear Customer,
+
+Greetings from HDFC Bank!
+
+We're sharing this alert to help you quickly check a recent UPI transaction made using your RuPay Credit Card.
+
+Transaction Details:
+Rs.110.00 has been debited from your RuPay Credit Card 2668
+Paid to paytm-80132274@ptys
+Date: 19-06-26
+UPI Transaction Reference Number: 125005046968
+
+Important Note:
+If you made this transaction, no action is needed.
+If you did not make this transaction, please act immediately. Your safety and trust are very important to us, and we are here to support you at every step.
+
+What You Can Do if This Was Not You:
+1. Report Unauthorised Transaction
+   Call HDFC Bank Helpline at 1800 258 6161
+   Submit the Online Dispute Form
+   Email us at: cc.disputes@hdfc.bank.in
+
+2. Report Cyber Fraud
+   Visit: https://cybercrime.gov.in
+   Call the National Cyber Crime Helpline at 1930
+
+Warm Regards,
+HDFC Bank

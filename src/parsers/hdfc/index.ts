@@ -7,6 +7,7 @@ import * as ccDebit from './templates/cc-debit.js';
 import * as ccThanks from './templates/cc-thanks.js';
 import * as ccUpiDebit from './templates/cc-upi-debit.js';
 import * as ccUpiDebitV2 from './templates/cc-upi-debit-v2.js';
+import * as ccUpiDebitV3 from './templates/cc-upi-debit-v3.js';
 import * as upiCredit from './templates/upi-credit.js';
 import * as upiDebit from './templates/upi-debit.js';
 
@@ -25,6 +26,7 @@ const TEMPLATES: TemplateParser[] = [
   ccAutopayUpcoming.tryParse,
   ccAutopay.tryParse,
   ccThanks.tryParse,
+  ccUpiDebitV3.tryParse,
   ccUpiDebitV2.tryParse,
   ccUpiDebit.tryParse,
   ccDebit.tryParse,
