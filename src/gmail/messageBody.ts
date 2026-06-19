@@ -160,8 +160,7 @@ const HDFC_FROM_PATTERNS = [
 // the parser chain.
 const MARKETING_SUBJECT_PATTERNS = [
   /\bloan\b/i,
-  /\bsmart\s*emi\b/i,
-  /\bemi loan\b/i,
+  /\bemis?\b/i, // Covers "Smart EMI", "EMI loan", "Check Your EMI", "EMIs + medical bills"
   /\bvoucher\b/i,
   /\blimit boosted\b/i,
   /\bcongratulations\b/i,
@@ -172,6 +171,11 @@ const MARKETING_SUBJECT_PATTERNS = [
   /\bclaim(ed)?\s+(your|the)\b/i,
   /\bpre-?approved\b/i,
   /\bcredit\s+limit\s+(increase|boost)/i,
+  /\bincrease\s+your\s+(?:credit\s+)?limit/i, // "Increase your limit to Rs.X", "Increase your Credit Limit on…"
+  /\blimit\s+upgrade/i, // "FREE Limit upgrade is here"
+  /\bzero\s+(?:charges|processing\s+fee)/i, // "ZERO CHARGES", "Zero Processing Fee + Reduced Interest"
+  /\bsave\s+up\s+to/i, // "Save up to 26,400 with your Debit Card"
+  /\bpack\s+your\s+bags/i, // travel-loan campaign
   /\boffer\b/i,
   /Update:\s/i, // "A/c xx5264 Update: ..." — HDFC's standard marketing prefix
 ];
