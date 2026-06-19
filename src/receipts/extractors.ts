@@ -463,6 +463,17 @@ export function pickExtractor(fromAddress: string): {
         extractSwiggy(text) ?? extractInstamart(text) ?? extractUniversal(text),
     };
   }
+  // Swiggy switched the sender for Instamart-branded emails from
+  // no-reply@swiggy.in to noreply@instamart.in. Same body shape — just
+  // route directly into extractInstamart. extractInstamart returns
+  // null when the body doesn't look Instamart-shaped, so the
+  // universal fallback still catches edge cases.
+  if (addr.includes('instamart.in') || addr.includes('@instamart.')) {
+    return {
+      source: 'instamart',
+      extract: (text) => extractInstamart(text) ?? extractUniversal(text),
+    };
+  }
   // Other merchants currently use the universal extractor. Add per-
   // merchant parsers here as the data warrants.
   if (addr.includes('zomato.com') || addr.includes('@zomato.')) {
@@ -505,6 +516,7 @@ export function pickExtractor(fromAddress: string): {
  */
 export const RECEIPT_SENDER_DOMAINS = [
   'swiggy.in',
+  'instamart.in', // Swiggy now sends Instamart receipts from noreply@instamart.in
   'zomato.com',
   'amazon.in',
   'amazon.com',
