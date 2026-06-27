@@ -88,16 +88,24 @@ struct NotesEditorSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .foregroundStyle(AppColor.tap)
-                        .disabled(saving)
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .disabled(saving)
+                    .accessibilityLabel("Cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(saving ? "Saving…" : "Save") {
+                    Button {
                         Task { await save() }
+                    } label: {
+                        if saving {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "checkmark")
+                        }
                     }
-                    .foregroundStyle(AppColor.tap)
                     .disabled(saving || !hasChanges)
+                    .accessibilityLabel("Save")
                 }
             }
         }
