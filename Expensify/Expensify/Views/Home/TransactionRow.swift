@@ -85,11 +85,8 @@ struct TransactionRow: View {
         }
     }
 
-    /// Category line + optional "more details" hint chip. Chip shows
-    /// only when the detail sheet actually has something extra to
-    /// reveal (map / receipt / Places picker). Non-interactive — the
-    /// whole row's .onTapGesture handles the actual sheet open;
-    /// the chip just signals "there's more to see here."
+    /// Category line. The whole row's `.onTapGesture` opens the detail
+    /// sheet — no inline "more details" hint chip.
     @ViewBuilder
     private var metaLine: some View {
         HStack(spacing: 6) {
@@ -97,31 +94,8 @@ struct TransactionRow: View {
                 .font(.system(size: 13))
                 .foregroundStyle(AppColor.textSecondary)
 
-            if shouldShowInfo {
-                Text("more details")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(AppColor.tap)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(AppColor.tap.opacity(0.08))
-                    .clipShape(Capsule())
-                    .allowsHitTesting(false)
-            }
-
             Spacer(minLength: 0)
         }
-    }
-
-    /// True when the detail sheet has content beyond the basic header —
-    /// a map preview, a bound receipt, or unclaimed Places suggestions.
-    /// Drives the visibility of the "more details" hint chip. The row
-    /// tap gesture is unconditional — even rows without rich content
-    /// still open the sheet (where the user can read notes / view
-    /// metadata), they just don't get the visual nudge.
-    private var shouldShowInfo: Bool {
-        transaction.hasCoordinates ||
-        transaction.receipt != nil ||
-        (transaction.placesSuggestions?.isEmpty == false)
     }
 
     /// True when the row is rendering as a contact-overlay P2P.

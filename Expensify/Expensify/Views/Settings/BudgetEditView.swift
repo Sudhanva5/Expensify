@@ -39,10 +39,10 @@ struct BudgetEditView: View {
                 Section {
                     HStack {
                         Text("₹")
-                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(AppColor.textTertiary)
                         TextField("e.g. 5000", text: $draftLimit)
-                            .font(.system(size: 16, weight: .medium, design: .rounded).monospacedDigit())
+                            .font(.system(size: 16, weight: .medium).monospacedDigit())
                             .keyboardType(.numberPad)
                     }
                 } header: {

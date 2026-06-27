@@ -2,11 +2,11 @@ import SwiftUI
 
 /// Circular merchant avatar.
 ///   • If we recognize the merchant → render a Google favicon
+///   • Else if the row has a category → its bundled illustration
 ///   • Otherwise → two-letter initials on a warm-tinted circle
 ///
 /// AsyncImage handles loading + caching automatically. While the favicon
-/// loads (or if it fails), we show the initials placeholder so the row
-/// is never blank.
+/// loads (or if it fails), we show the fallback so the row is never blank.
 struct MerchantAvatar: View {
     let merchantName: String
     var size: CGFloat = 44
@@ -91,11 +91,18 @@ struct MerchantAvatar: View {
     }
 
     /// What to render when neither a contact photo nor a favicon is
-    /// available. Prefers the category icon (more informative) over
-    /// initials when a categoryFallback was supplied.
+    /// available. Prefers the category's bundled illustration (most
+    /// characterful), then its SF Symbol for categories without art
+    /// (Personal Transfer), then plain initials.
     @ViewBuilder
     private var fallbackView: some View {
-        if let categoryFallback {
+        if let categoryFallback, let asset = categoryFallback.spendImageName {
+            Image(asset)
+                .resizable()
+                .scaledToFit()
+                .padding(size * 0.14)
+                .frame(width: size, height: size)
+        } else if let categoryFallback {
             Image(systemName: categoryFallback.symbolName)
                 .font(.system(size: size * 0.42, weight: .semibold))
                 .foregroundStyle(AppColor.textPrimary.opacity(0.78))
@@ -106,7 +113,7 @@ struct MerchantAvatar: View {
 
     private var initialsView: some View {
         Text(initials)
-            .font(.system(size: size * 0.36, weight: .semibold, design: .rounded))
+            .font(.system(size: size * 0.36, weight: .semibold))
             .foregroundStyle(AppColor.textPrimary.opacity(0.75))
     }
 }

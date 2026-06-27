@@ -6,6 +6,7 @@ import SwiftUI
 struct ActivityView: View {
     @Binding var showSettings: Bool
     @Environment(TransactionStore.self) private var store
+    @Environment(ProfilePhotoStore.self) private var profilePhotoStore
 
     @State private var queue: [ReviewItem] = []
     @State private var pendingTags: [PendingTag] = []
@@ -16,26 +17,25 @@ struct ActivityView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                AppColor.canvas.ignoresSafeArea()
-                Group {
-                    if store.isLoading && store.transactions.isEmpty {
-                        LoadingView()
-                    } else if queue.isEmpty && pendingTags.isEmpty {
-                        EmptyStateView()
-                    } else {
-                        cardStack
+            VStack(spacing: 0) {
+                header
+                ZStack {
+                    AppColor.canvas.ignoresSafeArea()
+                    Group {
+                        if store.isLoading && store.transactions.isEmpty {
+                            LoadingView()
+                        } else if queue.isEmpty && pendingTags.isEmpty {
+                            EmptyStateView()
+                        } else {
+                            cardStack
+                        }
                     }
-                }
-                .connectivityBanner(store: store)
-            }
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    AvatarButton(initials: CurrentUser.initials) { showSettings = true }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .connectivityBanner(store: store)
                 }
             }
+            .background(AppColor.canvas)
+            .navigationBarHidden(true)
             .task {
                 if store.transactions.isEmpty { await store.refresh() }
                 syncQueueFromStore()
@@ -54,20 +54,30 @@ struct ActivityView: View {
         }
     }
 
+    // Header — title + avatar, same treatment as Home / Analytics.
+    private var header: some View {
+        HStack(alignment: .center) {
+            Text("Review")
+                .font(.system(size: 34, weight: .bold))
+                .foregroundStyle(AppColor.textPrimary)
+            Spacer()
+            AvatarButton(initials: CurrentUser.initials,
+                         image: profilePhotoStore.image) { showSettings = true }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+    }
+
     @ViewBuilder
     private var cardStack: some View {
         VStack(spacing: 18) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("review")
-                    .font(AppFont.pageTitle)
-                    .foregroundStyle(AppColor.textPrimary)
-                Text("\(min(swipedCount + 1, totalCount)) of \(totalCount) — swipe to clear the queue")
-                    .font(AppFont.rowSubtitle)
-                    .foregroundStyle(AppColor.textSecondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.top, 4)
+            Text("\(min(swipedCount + 1, totalCount)) of \(totalCount) — swipe to clear the queue")
+                .font(AppFont.rowSubtitle)
+                .foregroundStyle(AppColor.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 4)
 
             ZStack {
                 ForEach(visibleCards.reversed()) { item in
@@ -91,30 +101,24 @@ struct ActivityView: View {
                     Button {
                         handleSwipe(item: topCard, direction: .left)
                     } label: {
-                        Label("needs tag", systemImage: "tag")
-                            .font(.system(size: 14, weight: .semibold))
+                        Label("Needs Tag", systemImage: "tag")
+                            .font(.system(size: 15, weight: .semibold))
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 13)
                     }
-                    .background(AppColor.surface)
-                    .foregroundStyle(AppColor.textPrimary)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(AppColor.hairline, lineWidth: 0.5)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .tint(AppColor.textPrimary)
 
                     Button {
                         handleSwipe(item: topCard, direction: .right)
                     } label: {
-                        Label("looks ok", systemImage: "checkmark")
-                            .font(.system(size: 14, weight: .semibold))
+                        Label("Looks OK", systemImage: "checkmark")
+                            .font(.system(size: 15, weight: .semibold))
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 13)
                     }
-                    .background(AppColor.inflow)
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(AppColor.inflow)
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 8)
@@ -244,4 +248,5 @@ private struct ErrorView: View {
     @Previewable @State var s = false
     return ActivityView(showSettings: $s)
         .environment(TransactionStore())
+        .environment(ProfilePhotoStore())
 }

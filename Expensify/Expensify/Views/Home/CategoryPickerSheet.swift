@@ -57,7 +57,7 @@ struct CategoryPickerSheet: View {
     /// optional pin row (~64 + divider) + bottom cushion. Grows
     /// depending on which optional rows are actually shown.
     private var sheetHeight: CGFloat {
-        let base: CGFloat = 490
+        let base: CGFloat = 512
         let renameRow: CGFloat = 56 // always shown
         let notesRow: CGFloat = 56  // always shown
         let pinRow: CGFloat = canPinContact ? 64 : 0
@@ -82,24 +82,24 @@ struct CategoryPickerSheet: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.top, 16)
+            .padding(.top, 44)
         }
         .presentationDetents([.height(sheetHeight)])
         .presentationDragIndicator(.visible)
         .presentationBackground(AppColor.canvas)
-        .alert("rename merchant", isPresented: $showingRenamePrompt) {
-            TextField("display name", text: $renameDraft)
+        .alert("Rename Merchant", isPresented: $showingRenamePrompt) {
+            TextField("Display name", text: $renameDraft)
                 .textInputAutocapitalization(.words)
-            Button("cancel", role: .cancel) {}
-            Button(renaming ? "saving…" : "save") {
+            Button("Cancel", role: .cancel) {}
+            Button(renaming ? "Saving…" : "Save") {
                 Task { await submitRename() }
             }
             .disabled(renaming || renameDraft.trimmingCharacters(in: .whitespaces).isEmpty)
         } message: {
             if let vpa = transaction.vpa, !vpa.isEmpty {
-                Text("applies to all transactions on \(vpa).")
+                Text("Applies to all transactions on \(vpa).")
             } else {
-                Text("applies to this transaction only — it has no VPA to propagate against.")
+                Text("Applies to this transaction only — it has no VPA to propagate against.")
             }
         }
         .sheet(isPresented: $showingNotesEditor) {
@@ -133,27 +133,11 @@ struct CategoryPickerSheet: View {
 
     @ViewBuilder
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("edit details")
-                .font(.system(size: 11, weight: .semibold).smallCaps())
-                .foregroundStyle(AppColor.textTertiary)
-            Text(transaction.displayMerchant)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(AppColor.textPrimary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            // One-liner hint of what's available in the sheet. Drops
-            // the contact half when the row isn't pin-eligible (merchant
-            // VPAs / credit card rows) so we don't promise affordances
-            // that won't appear below.
-            Text(canPinContact
-                 ? "pick category · rename · notes · pin contact"
-                 : "pick category · rename · notes")
-                .font(AppFont.caption)
-                .foregroundStyle(AppColor.textTertiary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20)
+        Text("Edit Details")
+            .font(.system(size: 20, weight: .bold))
+            .foregroundStyle(AppColor.textPrimary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
     }
 
     @ViewBuilder
@@ -162,7 +146,7 @@ struct CategoryPickerSheet: View {
             ForEach(Category.allCases) { cat in
                 Button(action: { pick(cat) }) {
                     rowLayout(
-                        icon: cat.symbolName,
+                        icon: cat.spendImageName.map(RowIcon.image) ?? .symbol(cat.symbolName),
                         title: cat.shortName,
                         subtitle: nil,
                         accessory: transaction.category == cat ? .checkmark : .none,
@@ -188,10 +172,10 @@ struct CategoryPickerSheet: View {
             showingRenamePrompt = true
         } label: {
             rowLayout(
-                icon: "pencil",
-                title: "rename merchant",
-                subtitle: transaction.vpa.map { "applies to \($0)" }
-                    ?? "applies to this row only",
+                icon: .symbol("pencil"),
+                title: "Rename Merchant",
+                subtitle: transaction.vpa.map { "Applies to \($0)" }
+                    ?? "Applies to this row only",
                 accessory: .chevron,
                 highlighted: true
             )
@@ -217,8 +201,8 @@ struct CategoryPickerSheet: View {
             showingNotesEditor = true
         } label: {
             rowLayout(
-                icon: existing.isEmpty ? "square.and.pencil" : "note.text",
-                title: existing.isEmpty ? "add notes" : "edit notes",
+                icon: .symbol(existing.isEmpty ? "square.and.pencil" : "note.text"),
+                title: existing.isEmpty ? "Add Notes" : "Edit Notes",
                 subtitle: preview,
                 accessory: .chevron,
                 highlighted: true
@@ -237,11 +221,11 @@ struct CategoryPickerSheet: View {
             showingContactPicker = true
         } label: {
             rowLayout(
-                icon: pinnedName == nil
+                icon: .symbol(pinnedName == nil
                     ? "person.crop.circle.badge.plus"
-                    : "person.crop.circle.fill.badge.checkmark",
-                title: pinnedName ?? "pin to contact",
-                subtitle: pinnedName != nil ? "long-press to unpin" : nil,
+                    : "person.crop.circle.fill.badge.checkmark"),
+                title: pinnedName ?? "Pin to Contact",
+                subtitle: pinnedName != nil ? "Long-press to unpin" : nil,
                 accessory: .chevron,
                 highlighted: true
             )
@@ -261,22 +245,33 @@ struct CategoryPickerSheet: View {
     /// `highlighted` rows get the accent-blue glyph treatment (used
     /// for the contact-pin row + the currently-selected category).
     private enum RowAccessory { case none, checkmark, chevron }
+    /// Row icon — either a bundled illustration (categories) or an SF Symbol.
+    private enum RowIcon { case image(String), symbol(String) }
 
     @ViewBuilder
     private func rowLayout(
-        icon: String,
+        icon: RowIcon,
         title: String,
         subtitle: String?,
         accessory: RowAccessory,
         highlighted: Bool = false
     ) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(highlighted ? AppColor.tap : AppColor.textPrimary)
-                .frame(width: 28, height: 28)
-                .background(AppColor.avatarFill)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            // Circular icon container — circles throughout to break up the
+            // box-heavy look.
+            Group {
+                switch icon {
+                case .image(let name):
+                    Image(name).resizable().scaledToFit().padding(5)
+                case .symbol(let symbol):
+                    Image(systemName: symbol)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(AppColor.textPrimary)
+                }
+            }
+            .frame(width: 32, height: 32)
+            .background(AppColor.avatarFill)
+            .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
@@ -300,7 +295,7 @@ struct CategoryPickerSheet: View {
             case .checkmark:
                 Image(systemName: "checkmark")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AppColor.tap)
+                    .foregroundStyle(AppColor.textPrimary)
             case .chevron:
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))

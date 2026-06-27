@@ -289,6 +289,26 @@ describe('HDFC parser — Template E v3: RuPay CC UPI debit (June 2026 reword)',
     expect(result.data.externalRef).toBe('125005046968');
     expect(result.data.isAutopay).toBe(false);
   });
+
+  it('parses the "(ending NNNN)" variant — no "HDFC Bank" prefix, parenthesised ending', () => {
+    const result = parseHdfcEmail({
+      subject: '❗  You have done a UPI txn. Check details!',
+      body: loadFixture('cc-upi-debit-v3-paren.txt'),
+      receivedAt: new Date('2026-06-26T16:12:00Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.template).toBe('cc_upi_debit_v3');
+    expect(result.data.direction).toBe('out');
+    expect(result.data.instrument).toBe('card_2668');
+    expect(result.data.amountMinor).toBe(20000n); // ₹200.00
+    expect(result.data.vpa).toBe('qexample123@ybl');
+    expect(result.data.merchantRaw).toBe('qexample123');
+    expect(result.data.externalRef).toBe('120000000001');
+    expect(result.data.isAutopay).toBe(false);
+  });
 });
 
 describe('HDFC parser — Template F: cc_thanks ("Thank you for using ...")', () => {

@@ -26,6 +26,10 @@ struct ReceiptCard: View {
                     Divider().opacity(0.4)
                     feesSection(fees)
                 }
+                if let total = receipt.amountInr {
+                    Divider().overlay(AppColor.hairline)
+                    totalRow(total)
+                }
             } else {
                 Divider().opacity(0.4)
                 snippetSection
@@ -56,7 +60,7 @@ struct ReceiptCard: View {
             Spacer()
             if let amount = receipt.amountInr {
                 Text(formatRupees(amount))
-                    .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 14, weight: .semibold).monospacedDigit())
                     .foregroundStyle(AppColor.textPrimary)
             }
         }
@@ -72,7 +76,7 @@ struct ReceiptCard: View {
                         .foregroundStyle(AppColor.textPrimary)
                     Spacer()
                     Text(formatRupees(item.priceInr))
-                        .font(.system(size: 13, design: .rounded).monospacedDigit())
+                        .font(.system(size: 13).monospacedDigit())
                         .foregroundStyle(AppColor.textSecondary)
                 }
             }
@@ -93,6 +97,19 @@ struct ReceiptCard: View {
                         .foregroundStyle(AppColor.textTertiary)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func totalRow(_ total: Decimal) -> some View {
+        HStack {
+            Text("Total")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(AppColor.textPrimary)
+            Spacer()
+            Text(formatRupees(total))
+                .font(.system(size: 15, weight: .bold).monospacedDigit())
+                .foregroundStyle(AppColor.textPrimary)
         }
     }
 

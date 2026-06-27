@@ -56,12 +56,12 @@ const STRONG_TYPE_TO_CATEGORY: Record<string, string> = {
   buffet_restaurant: 'Food',
 
   // ---- Groceries -------------------------------------------------------
-  grocery_store: 'Shopping',
-  supermarket: 'Shopping',
-  convenience_store: 'Shopping',
-  food_store: 'Shopping',
-  butcher_shop: 'Shopping',
-  market: 'Shopping',
+  grocery_store: 'Groceries',
+  supermarket: 'Groceries',
+  convenience_store: 'Groceries',
+  food_store: 'Groceries',
+  butcher_shop: 'Groceries',
+  market: 'Groceries',
 
   // ---- Entertainment ---------------------------------------------------
   movie_theater: 'Entertainment',

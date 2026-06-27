@@ -110,9 +110,10 @@ extension Color {
     }
 }
 
-/// Typography. iOS native SF Pro family is the right call here — Apple
-/// designed it for exactly this kind of UI. We use the rounded variant on
-/// numbers and the rest is SF Pro with explicit weights.
+/// Typography. iOS native SF Pro family throughout — Apple designed it for
+/// exactly this kind of UI. SF Pro with explicit weights everywhere; numbers
+/// add `.monospacedDigit()` so columns of amounts align. (No SF Pro Rounded —
+/// its glyph set is missing ₹, which fell back to a mismatched font.)
 enum AppFont {
     static let pageTitle: Font = .system(size: 32, weight: .bold)
     static let sectionLabel: Font = .system(size: 11, weight: .semibold)
@@ -120,11 +121,11 @@ enum AppFont {
     static let rowTitle: Font = .system(size: 16, weight: .semibold)
     static let rowSubtitle: Font = .system(size: 13, weight: .regular)
     static let caption: Font = .system(size: 11, weight: .regular)
-    static let bigNumber: Font = .system(size: 28, weight: .semibold, design: .rounded)
+    static let bigNumber: Font = .system(size: 28, weight: .semibold)
         .monospacedDigit()
-    static let rowAmount: Font = .system(size: 16, weight: .semibold, design: .rounded)
+    static let rowAmount: Font = .system(size: 16, weight: .semibold)
         .monospacedDigit()
-    static let amountDecimal: Font = .system(size: 13, weight: .semibold, design: .rounded)
+    static let amountDecimal: Font = .system(size: 13, weight: .semibold)
         .monospacedDigit()
     static let chipLabel: Font = .system(size: 12, weight: .medium)
 }

@@ -1,0 +1,22 @@
+HDFC BANK
+
+Dear Customer ,
+
+Greetings from HDFC Bank!
+
+We're sharing this alert to help you quickly check a recent UPI transaction made using your RuPay Credit Card.
+
+Transaction Details:
+Rs.200.00 has been debited from your RuPay Credit Card (ending 2668)
+Paid to qexample123@ybl
+Date: 26-06-26
+UPI Transaction Reference Number: 120000000001
+
+Important Note:
+If you made this transaction, no action is needed.
+If you did not make this transaction, please act immediately.
+
+Thank you for banking with HDFC Bank.
+
+Warm Regards,
+HDFC Bank

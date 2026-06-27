@@ -20,6 +20,8 @@ struct ExpensifyApp: App {
     /// Local-only contact matcher. Reads device contacts, never syncs to
     /// the backend. Used to overlay friend names + DPs onto UPI rows.
     @State private var contactsService = ContactsService()
+    /// User-picked profile photo for the avatar. On-device only.
+    @State private var profilePhotoStore = ProfilePhotoStore()
 
     /// User-controllable theme override. `.system` (default) follows the
     /// device-level Light/Dark setting; `.light` / `.dark` force the
@@ -63,6 +65,7 @@ struct ExpensifyApp: App {
                 .environment(transactionStore)
                 .environment(budgetStore)
                 .environment(contactsService)
+                .environment(profilePhotoStore)
                 .task {
                     await budgetStore.refresh()
                     // Hydrate VPA→contact pins from UserDefaults BEFORE

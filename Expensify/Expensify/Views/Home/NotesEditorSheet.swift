@@ -75,7 +75,7 @@ struct NotesEditorSheet: View {
                                 .foregroundStyle(.red)
                         }
 
-                        Text("private to you. surfaced to claude via mcp so spend questions can reference what you wrote here.")
+                        Text("Private to you. Surfaced to Claude via MCP so spend questions can reference what you wrote here.")
                             .font(AppFont.caption)
                             .foregroundStyle(AppColor.textTertiary)
                     }
@@ -84,16 +84,16 @@ struct NotesEditorSheet: View {
                     .padding(.bottom, 24)
                 }
             }
-            .navigationTitle("notes")
+            .navigationTitle("Notes")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("cancel") { dismiss() }
+                    Button("Cancel") { dismiss() }
                         .foregroundStyle(AppColor.tap)
                         .disabled(saving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(saving ? "saving…" : "save") {
+                    Button(saving ? "Saving…" : "Save") {
                         Task { await save() }
                     }
                     .foregroundStyle(AppColor.tap)

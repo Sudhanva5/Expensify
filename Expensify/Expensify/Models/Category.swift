@@ -1,10 +1,11 @@
 import Foundation
 import SwiftUI
 
-// V1's seven fixed categories. Mirrors the backend's CATEGORIES const.
+// Fixed categories. Mirrors the backend's CATEGORIES const.
 enum Category: String, CaseIterable, Identifiable, Codable, Hashable {
     case travel = "Travel"
     case food = "Food"
+    case groceries = "Groceries"
     case entertainment = "Entertainment"
     case shopping = "Shopping"
     case personalTransfer = "Personal Transfer (Peer-to-Peer)"
@@ -18,6 +19,7 @@ enum Category: String, CaseIterable, Identifiable, Codable, Hashable {
         switch self {
         case .travel: return "Travel"
         case .food: return "Food"
+        case .groceries: return "Groceries"
         case .entertainment: return "Entertainment"
         case .shopping: return "Shopping"
         case .personalTransfer: return "P2P"
@@ -33,6 +35,7 @@ enum Category: String, CaseIterable, Identifiable, Codable, Hashable {
         switch self {
         case .travel: return "airplane"
         case .food: return "fork.knife"
+        case .groceries: return "basket"
         case .entertainment: return "popcorn"
         case .shopping: return "bag"
         case .personalTransfer: return "person.2"
@@ -46,6 +49,7 @@ enum Category: String, CaseIterable, Identifiable, Codable, Hashable {
         switch self {
         case .travel: return .blue
         case .food: return .orange
+        case .groceries: return .brown
         case .entertainment: return .pink
         case .shopping: return .green
         case .personalTransfer: return .purple

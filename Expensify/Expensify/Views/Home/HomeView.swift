@@ -4,7 +4,7 @@ import Combine
 /// Home tab — Cred-style restrained list.
 ///
 /// Layout (top to bottom):
-///   • Lowercase page title + greeting
+///   • Wallet balance hero (bank-card artwork + balance lettering)
 ///   • Filter pills (sort / date scope)
 ///   • Month section label
 ///   • Transaction rows (no dividers)
@@ -13,6 +13,7 @@ struct HomeView: View {
     @Binding var showSettings: Bool
     @Environment(TransactionStore.self) private var store
     @Environment(ContactsService.self) private var contactsService
+    @Environment(ProfilePhotoStore.self) private var profilePhotoStore
     @State private var range: DateRange = .defaultRange
     @State private var instrumentFilter: String? = nil
     /// When non-nil, the category-picker sheet is presented for this row.
@@ -24,19 +25,34 @@ struct HomeView: View {
     /// a placeholder instead of "₹0.00" zero-state.
     @State private var accountBalances: [AccountBalance] = []
     @State private var balanceLoading: Bool = false
+    /// Spend tile the user drilled into; drives the category-detail push.
+    @State private var selectedSpend: SpendSelection? = nil
 
     private var dateScoped: [Transaction] {
         store.transactions.filter { range.contains($0.occurredAt) }
     }
 
-    private var availableInstruments: [(instrument: String, count: Int)] {
-        var counts: [String: Int] = [:]
-        for tx in dateScoped {
-            counts[tx.instrument, default: 0] += 1
+    /// Combined outflow across all credit-card instruments (`card_*`)
+    /// within the active date scope — the headline "Credit Cards" tile.
+    /// Replaces the old per-card instrument breakdown.
+    private var creditCardTotal: Decimal {
+        dateScoped
+            .filter { $0.direction == .out && $0.instrument.hasPrefix("card_") }
+            .reduce(Decimal(0)) { $0 + $1.amountInr }
+    }
+
+    /// Per-category outflow within the active scope — only categories with
+    /// bundled art and non-zero spend, sorted high→low.
+    private var categorySpends: [(category: Category, total: Decimal)] {
+        var totals: [Category: Decimal] = [:]
+        for tx in dateScoped where tx.direction == .out {
+            guard let c = tx.category, c.spendImageName != nil else { continue }
+            totals[c, default: 0] += tx.amountInr
         }
-        return counts
-            .map { ($0.key, $0.value) }
-            .sorted { $0.count > $1.count }
+        return totals
+            .map { (category: $0.key, total: $0.value) }
+            .filter { $0.total > 0 }
+            .sorted { $0.total > $1.total }
     }
 
     private var filtered: [Transaction] {
@@ -60,78 +76,71 @@ struct HomeView: View {
                     if accountBalances.isEmpty { await refreshBalances() }
                 }
                 .connectivityBanner(store: store)
-                // Dock as a bottom safe-area inset, NOT a ZStack overlay.
-                //   • Inset means the list naturally ends above the dock —
-                //     no list rows hide behind the floating capsule, and
-                //     the last row never collides with the chips.
-                //   • SwiftUI inserts the inset *above* the tab-bar safe
-                //     area, so the dock can't get squashed by tab-bar
-                //     height changes, badge animations, or the keyboard.
-                //   • Tap routing improves too: chips are no longer
-                //     competing for hit-test with scrollable list rows
-                //     they sit over.
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if availableInstruments.count > 1 {
-                        InstrumentDock(
-                            instruments: availableInstruments,
-                            selected: $instrumentFilter
-                        )
-                    }
+                // Floating filter button — bottom-trailing, above the
+                // instrument dock / tab bar. Replaces the inline filter row
+                // so the list starts higher. Carries the same Menu + picker
+                // sheets as the old pill.
+                .overlay(alignment: .bottomTrailing) {
+                    DateRangeFilter(range: $range, appearance: .fab)
+                        .padding(.trailing, 18)
+                        .padding(.bottom, 18)
                 }
                 .background(AppColor.canvas.ignoresSafeArea())
-                .navigationTitle("")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        AvatarButton(initials: CurrentUser.initials) { showSettings = true }
-                    }
-                }
+                // Nav bar hidden — the header (title + avatar) lives in the
+                // page body as its own row, so we don't spend a nav-bar's
+                // worth of vertical space on chrome.
+                .navigationBarHidden(true)
                 .sheet(item: $editingTagFor) { tx in
                     CategoryPickerSheet(transaction: tx)
                         .environment(store)
                 }
+                .navigationDestination(item: $selectedSpend) { selection in
+                    detailView(for: selection)
+                }
         }
+    }
+
+    /// Builds the drill-in detail for a tapped spend tile. The detail owns
+    /// a binding to `range`, so its filter button re-scopes both screens.
+    private func detailView(for selection: SpendSelection) -> some View {
+        SpendDetailView(selection: selection, range: $range)
     }
 
     private var content: some View {
         List {
-            // Hero block — edge-to-edge gradient + star field with the
-            // greeting overlaid. Replaces the flat title+greeting block;
-            // sets a tone before any data lands.
+            // Header row — title and avatar on one line, in the page body
+            // (not the nav bar). Title sits left, avatar pinned right.
             Section {
-                HeroSection(greeting: greeting, inlineCount: filtered.count)
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets())
+                HStack(alignment: .center) {
+                    Text("Transactions")
+                        // Apple HIG large-title scale (34pt bold).
+                        .font(.system(size: 34, weight: .bold))
+                        .foregroundStyle(AppColor.textPrimary)
+                    Spacer()
+                    AvatarButton(initials: CurrentUser.initials,
+                                 image: profilePhotoStore.image) { showSettings = true }
+                }
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 10, leading: 20, bottom: 6, trailing: 16))
             }
             .listSectionSpacing(0)
 
-            // Balance card — sits in the middle with breathing room
-            // ABOVE (separates it from the header) AND BELOW (so it
-            // reads as its own beat rather than running into the
-            // transaction list).
+            // Balance card — the wallet hero leads the page (the old
+            // night-sky HeroSection was removed in the UI revamp). Breathing
+            // room below so it reads as its own beat before the list.
             Section {
                 balanceCard
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 18, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 12, leading: 10, bottom: 6, trailing: 10))
             }
             .listSectionSpacing(.compact)
 
-            // Date filter — visually glued to the transaction list
-            // below. Section spacing forced to 0 (the .compact preset
-            // still left a visible gap) so the filter pill and the
-            // first month-section header read as one block.
-            Section {
-                HStack {
-                    DateRangeFilter(range: $range)
-                    Spacer()
-                }
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
-            }
-            .listSectionSpacing(0)
+            // (Date filter moved to a floating action button — see the
+            // `.fab` DateRangeFilter overlay in the body — to reclaim the row.
+            // Spend tiles render inside the first month section, just after
+            // its header — see `monthSections()` loop below.)
 
             // States
             if store.isLoading && store.transactions.isEmpty {
@@ -148,8 +157,17 @@ struct HomeView: View {
                 }
             } else {
                 // Group filtered transactions by month for the section label
-                ForEach(monthSections()) { section in
+                ForEach(Array(monthSections().enumerated()), id: \.element.id) { index, section in
                     Section {
+                        // Spend tiles sit just after the first month header.
+                        if index == 0 {
+                            CategorySpendRow(creditCardTotal: creditCardTotal,
+                                             categories: categorySpends,
+                                             onSelect: { selectedSpend = $0 })
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 12, trailing: 0))
+                        }
                         ForEach(section.transactions) { tx in
                             rowFor(tx)
                                 .listRowSeparator(.hidden)
@@ -173,16 +191,13 @@ struct HomeView: View {
                                 }
                         }
                     } header: {
-                        // Tight padding above the month-section header
-                        // so the date-filter pill above and the rows
-                        // below read as ONE group, not three.
-                        // Applies to every month transition during
-                        // scroll too — general principle: the filter
-                        // and the list are conceptually the same beat.
+                        // Tight above (sits close under the wallet); the gap
+                        // BELOW the header to the spend tiles is created by
+                        // the tiles' own top inset (first section only).
                         monthSectionHeader(section)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 20)
-                            .padding(.top, 4)
+                            .padding(.top, 2)
                             .padding(.bottom, 4)
                             .listRowInsets(EdgeInsets())
                     }
@@ -197,84 +212,79 @@ struct HomeView: View {
     /// re-queries the backend (which returns whatever HDFC's last
     /// "Account update" email said — there's no way to force HDFC to
     /// email a fresh balance on demand).
+    /// Account-balance hero — the bank-card wallet illustration with the
+    /// live balance written across its front pocket, so the card reads as
+    /// a physical wallet showing what's inside. The blue HDFC card is part
+    /// of the artwork, so there's no separate bank badge anymore.
     @ViewBuilder
     private var balanceCard: some View {
         let primary = accountBalances.first
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                hdfcBadge
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("HDFC Bank")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(AppColor.textPrimary)
-                    Text(primary.map { "account ending \($0.lastFour)" }
-                         ?? "account balance")
-                        .font(.system(size: 10))
-                        .foregroundStyle(AppColor.textTertiary)
-                }
-                Spacer()
-                Button {
-                    Task { await refreshBalances() }
-                } label: {
-                    if balanceLoading {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(AppColor.tap)
+        Image("AccountBalanceWallet")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay {
+                GeometryReader { geo in
+                    let w = geo.size.width
+                    let h = geo.size.height
+
+                    // Lettering sits on the brown front pocket (lower ⅔ of
+                    // the wallet). Ink is FIXED white, not a dynamic token —
+                    // the brown artwork doesn't flip in dark mode, so the
+                    // text stays white in both. Balance is refreshed by the
+                    // page's pull-to-refresh, so there's no inline button.
+                    VStack(spacing: 3) {
+                        Text("Account Balance")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(walletInk.opacity(0.78))
+                        balanceText(primary?.balanceInr)
+                            .foregroundStyle(walletInk)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                        Text(asOfText)
+                            .font(.system(size: 10))
+                            .foregroundStyle(walletInk.opacity(0.6))
                     }
+                    .frame(width: w * 0.82)
+                    .position(x: w / 2, y: h * 0.69)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Refresh balance")
             }
-
-            Text(formatRupees(primary?.balanceInr))
-                .font(.system(size: 30, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(AppColor.textPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-
-            Text(asOfText)
-                .font(.system(size: 11))
-                .foregroundStyle(AppColor.textTertiary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppColor.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(AppColor.hairline, lineWidth: 0.5)
-        )
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(primary.map { "Account balance ₹\(groupedRupees($0.balanceInr))" }
+                                 ?? "Account balance unavailable")
     }
 
-    /// HDFC logo — fetched via Google's favicon service so we get the
-    /// real bank logo without bundling a PNG ourselves. AsyncImage
-    /// caches automatically; while loading or on failure we fall
-    /// back to the stylized "HDFC" red monogram so the slot is
-    /// never empty.
+    /// Fixed white ink for lettering on the brown wallet artwork.
+    /// Deliberately NOT a dynamic AppColor token — the wallet PNG doesn't
+    /// flip in dark mode, so the text stays white in both or it'd vanish
+    /// against the brown leather.
+    private let walletInk = Color.white
+
+    /// Hero balance lettering — standard SF Pro throughout. The ₹ glyph is
+    /// a touch smaller than the digits, which stay monospaced so the number
+    /// reads cleanly. Concatenated into one Text so symbol and digits
+    /// baseline-align and scale together. "—" while the first balance fetch
+    /// is still pending.
     @ViewBuilder
-    private var hdfcBadge: some View {
-        let url = URL(string: "https://www.google.com/s2/favicons?domain=hdfcbank.com&sz=128")
-        AsyncImage(url: url, transaction: .init(animation: .easeOut(duration: 0.18))) { phase in
-            switch phase {
-            case .success(let img):
-                img
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 32, height: 32)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            default:
-                Text("HDFC")
-                    .font(.system(size: 8, weight: .heavy))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(Color(red: 0.93, green: 0.14, blue: 0.16))
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            }
+    private func balanceText(_ amount: Decimal?) -> some View {
+        if let amount {
+            Text(verbatim: "₹")
+                .font(.system(size: 38, weight: .bold))
+            + Text(verbatim: groupedRupees(amount))
+                .font(.system(size: 42, weight: .bold).monospacedDigit())
+        } else {
+            Text(verbatim: "—")
+                .font(.system(size: 42, weight: .bold))
         }
+    }
+
+    /// Indian-grouped whole rupees, no symbol ("34,235").
+    private func groupedRupees(_ amount: Decimal) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.locale = Locale(identifier: "en_IN")
+        f.maximumFractionDigits = 0
+        return f.string(from: NSDecimalNumber(decimal: amount)) ?? "\(amount)"
     }
 
     private var asOfText: String {
@@ -394,15 +404,15 @@ struct HomeView: View {
         // its own.
         VStack(alignment: .leading, spacing: 2) {
             Text(verbatim: String(section.year))
-                .font(.system(size: 11, weight: .semibold).smallCaps())
+                .font(.system(size: 12, weight: .semibold).smallCaps())
                 .foregroundStyle(AppColor.textTertiary)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(section.monthName.lowercased())
-                    .font(.system(size: 20, weight: .semibold))
+                Text(section.monthName)
+                    .font(.system(size: 26, weight: .bold))
                     .foregroundStyle(AppColor.textPrimary)
                 Spacer(minLength: 8)
                 Text(formatRupees(section.totalOutflow))
-                    .font(.system(size: 18, weight: .semibold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 22, weight: .semibold).monospacedDigit())
                     .foregroundStyle(AppColor.textPrimary)
             }
         }
@@ -420,37 +430,6 @@ struct HomeView: View {
         return "₹" + (f.string(from: n) ?? "\(amount)")
     }
 
-    /// Voice-driven greeting line for the hero. Time-of-day prefix +
-    /// punchy data tail. When the user hasn't spent today, leans into
-    /// the negative space ("nothing yet, enjoy it") rather than
-    /// padding with filler. Inspired by Railway's "Zero notifications.
-    /// Close the app, touch grass." energy.
-    private var greeting: String {
-        let hour = Calendar.current.component(.hour, from: Date())
-        let timeOfDay: String
-        switch hour {
-        case 4..<12: timeOfDay = "good morning"
-        case 12..<17: timeOfDay = "good afternoon"
-        case 17..<22: timeOfDay = "good evening"
-        default: timeOfDay = "burning the midnight oil"
-        }
-
-        let cal = Calendar.current
-        let todaysOutflow = store.transactions
-            .filter { cal.isDateInToday($0.occurredAt) && $0.direction == .out }
-            .reduce(Decimal(0)) { $0 + $1.amountInr }
-
-        if todaysOutflow == 0 {
-            return "\(timeOfDay). nothing spent yet. enjoy it."
-        }
-
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.maximumFractionDigits = 0
-        f.locale = Locale(identifier: "en_IN")
-        let amount = f.string(from: NSDecimalNumber(decimal: todaysOutflow)) ?? "0"
-        return "\(timeOfDay). ₹\(amount) down today."
-    }
 }
 
 /// Shown while the very first transactions fetch is in flight (no data
@@ -535,4 +514,5 @@ private struct EmptyHomeState: View {
     return HomeView(showSettings: $s)
         .environment(TransactionStore())
         .environment(ContactsService())
+        .environment(ProfilePhotoStore())
 }

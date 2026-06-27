@@ -45,8 +45,18 @@ const MARKER = /sharing this alert to help you quickly check a recent UPI transa
 // hops the line breaks between "...Credit Card NNNN", "Paid to <vpa>",
 // and "Date: DD-MM-YY". Non-greedy so we stop at the first match for
 // each field.
+//
+// Deliberately tolerant of the card-ending phrasing — HDFC has shipped
+// several within the same v3 layout, so we absorb them all rather than
+// add a template per reword. The "sharing this alert" MARKER already
+// gates this to genuine v3 alerts, so the looseness can't catch marketing:
+//   • "RuPay Credit Card 2668"            (bare)
+//   • "RuPay Credit Card (ending 2668)"   (parenthesised)
+//   • "RuPay Credit Card ending 2668"     (no parens)
+//   • "RuPay Credit Card XX2668"          (XX prefix)
+//   • optional "HDFC Bank " before "RuPay"; "has been debited"/"is debited".
 const FULL =
-  /Rs\.\s*([\d,]+(?:\.\d{1,2})?)\s+has been debited from your RuPay Credit Card\s+(\d+)[\s\S]*?Paid to\s+(\S+@\S+)[\s\S]*?Date:\s+(\d{2}-\d{2}-\d{2})/i;
+  /Rs\.?\s*([\d,]+(?:\.\d{1,2})?)\s+(?:has been|is)\s+debited from your (?:HDFC Bank\s+)?RuPay Credit Card\s*\(?\s*(?:ending\s+|XX\s*)?(\d{4})[\s\S]*?Paid to\s+(\S+@\S+)[\s\S]*?Date:\s+(\d{2}-\d{2}-\d{2})/i;
 
 const REF_RE = /UPI Transaction Reference Number\s*:?\s*(\d{6,})/i;
 

@@ -4,7 +4,13 @@ import SwiftUI
 /// day, month, custom — implemented as a Menu with three options.
 /// On selection, opens the appropriate picker as a sheet.
 struct DateRangeFilter: View {
+    /// Trigger style: an inline capsule (`.pill`, used on Categories) or a
+    /// circular floating action button (`.fab`, used on Home so the filter
+    /// doesn't cost a row of vertical space).
+    enum Appearance { case pill, fab }
+
     @Binding var range: DateRange
+    var appearance: Appearance = .pill
     @State private var showingDayPicker = false
     @State private var showingMonthPicker = false
     @State private var showingCustomPicker = false
@@ -37,17 +43,29 @@ struct DateRangeFilter: View {
                 showingCustomPicker = true
             }
         } label: {
-            HStack(spacing: 4) {
-                Text(range.label)
-                    .font(.subheadline.weight(.medium))
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.semibold))
+            switch appearance {
+            case .pill:
+                HStack(spacing: 4) {
+                    Text(range.label)
+                        .font(.subheadline.weight(.medium))
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color(.tertiarySystemFill))
+                .clipShape(Capsule())
+                .foregroundStyle(.primary)
+            case .fab:
+                // Circular FAB on the system Liquid Glass material (iOS 26),
+                // accent-tinted glyph. Falls back to a tinted surface on
+                // earlier iOS via `glassControl`.
+                Image(systemName: "line.3.horizontal.decrease")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(AppColor.textPrimary)
+                    .frame(width: 54, height: 54)
+                    .glassControl(Circle())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Color(.tertiarySystemFill))
-            .clipShape(Capsule())
-            .foregroundStyle(.primary)
         }
         .sheet(isPresented: $showingDayPicker) { dayPickerSheet }
         .sheet(isPresented: $showingMonthPicker) { monthPickerSheet }

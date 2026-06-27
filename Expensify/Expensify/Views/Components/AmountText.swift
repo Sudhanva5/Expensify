@@ -38,16 +38,16 @@ struct AmountText: View {
     // MARK: - Fonts
 
     private var symbolFont: Font {
-        .system(size: size, weight: .semibold, design: .rounded)
+        .system(size: size, weight: .semibold)
     }
 
     private var digitFont: Font {
-        .system(size: size, weight: .semibold, design: .rounded)
+        .system(size: size, weight: .semibold)
             .monospacedDigit()
     }
 
     private var decimalFont: Font {
-        .system(size: size * 0.82, weight: .semibold, design: .rounded)
+        .system(size: size * 0.82, weight: .semibold)
             .monospacedDigit()
     }
 

@@ -66,7 +66,7 @@ struct CategoriesView: View {
                                     .font(AppFont.bigNumber)
                                     .foregroundStyle(AppColor.textPrimary)
                                 Text(totalDecimalString)
-                                    .font(.system(size: 16, weight: .semibold, design: .rounded).monospacedDigit())
+                                    .font(.system(size: 16, weight: .semibold).monospacedDigit())
                                     .foregroundStyle(AppColor.textTertiary)
                             }
                         }

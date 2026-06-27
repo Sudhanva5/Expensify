@@ -1,10 +1,16 @@
 import SwiftUI
+import PhotosUI
 
 /// Settings sheet — presented from the avatar in any tab's nav bar.
-/// Cred-style: lowercase section labels, tight typography, restrained color.
+/// Standard iOS: inset-grouped list, system colors (no app theme tokens),
+/// large navigation title.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(BudgetStore.self) private var budgetStore
+    @Environment(ProfilePhotoStore.self) private var profilePhotoStore
+
+    /// Bound to the profile-photo PhotosPicker; loaded + persisted on change.
+    @State private var photoPickerItem: PhotosPickerItem?
 
     /// Theme preference, persisted by ExpensifyApp's @AppStorage. We
     /// bind to the same key here so the picker change instantly
@@ -20,28 +26,20 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                AppColor.canvas.ignoresSafeArea()
-
-                List {
-                    profileSection
-                    appearanceSection
-                    budgetsSection
-                    rulesSection
-                    diagnosticsSection
-                    accountSection
-                }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
-                .background(AppColor.canvas)
-                .listSectionSpacing(.compact)
+            List {
+                profileSection
+                appearanceSection
+                budgetsSection
+                rulesSection
+                diagnosticsSection
+                accountSection
             }
-            .navigationTitle("settings")
-            .navigationBarTitleDisplayMode(.inline)
+            .listStyle(.insetGrouped)
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("done") { dismiss() }
-                        .foregroundStyle(AppColor.tap)
+                    Button("Done") { dismiss() }
                 }
             }
         }
@@ -50,24 +48,66 @@ struct SettingsView: View {
     private var profileSection: some View {
         Section {
             HStack(spacing: 12) {
-                Text(CurrentUser.initials)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(AppColor.textPrimary)
+                // Tap the avatar to pick a photo; long-press handled by the
+                // Remove button below when one is set.
+                PhotosPicker(selection: $photoPickerItem, matching: .images) {
+                    Group {
+                        if let img = profilePhotoStore.image {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFill()
+                        } else {
+                            Text(CurrentUser.initials)
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Color.primary)
+                        }
+                    }
                     .frame(width: 48, height: 48)
-                    .background(AppColor.avatarFill)
+                    .background(Color(.secondarySystemFill))
                     .clipShape(Circle())
+                    .overlay(alignment: .bottomTrailing) {
+                        // Small camera badge to signal it's editable.
+                        Image(systemName: "camera.fill")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color(.systemBackground))
+                            .frame(width: 18, height: 18)
+                            .background(Color.accentColor)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5))
+                    }
+                }
+                .buttonStyle(.plain)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(CurrentUser.name)
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(AppColor.textPrimary)
+                        .foregroundStyle(Color.primary)
                     Text(CurrentUser.email)
                         .font(AppFont.caption)
-                        .foregroundStyle(AppColor.textTertiary)
+                        .foregroundStyle(Color.secondary)
                 }
                 Spacer()
+                if profilePhotoStore.hasPhoto {
+                    Button(role: .destructive) {
+                        profilePhotoStore.clear()
+                    } label: {
+                        Text("Remove")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.secondary)
+                }
             }
             .padding(.vertical, 4)
+        }
+        .onChange(of: photoPickerItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                if let data = try? await newItem.loadTransferable(type: Data.self) {
+                    profilePhotoStore.save(data)
+                }
+                photoPickerItem = nil
+            }
         }
     }
 
@@ -80,13 +120,13 @@ struct SettingsView: View {
             HStack(spacing: 12) {
                 Image(systemName: appearanceIcon)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AppColor.textPrimary)
+                    .foregroundStyle(Color.primary)
                     .frame(width: 24, height: 24)
-                    .background(AppColor.avatarFill)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                Text("theme")
+                    .background(Color(.secondarySystemFill))
+                    .clipShape(Circle())
+                Text("Theme")
                     .font(.system(size: 15))
-                    .foregroundStyle(AppColor.textPrimary)
+                    .foregroundStyle(Color.primary)
                 Spacer()
                 Picker("", selection: $themeRaw) {
                     ForEach(ThemePreference.allCases) { pref in
@@ -94,16 +134,16 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .tint(AppColor.tap)
+                .tint(Color.accentColor)
             }
         } header: {
-            Text("appearance")
+            Text("Appearance")
                 .font(AppFont.sectionLabel)
-                .foregroundStyle(AppColor.textTertiary)
+                .foregroundStyle(Color.secondary)
         } footer: {
-            Text("'system' follows your iphone's light/dark setting. choose light or dark to override.")
+            Text("'System' follows your iPhone's light/dark setting. Choose Light or Dark to override.")
                 .font(AppFont.caption)
-                .foregroundStyle(AppColor.textTertiary)
+                .foregroundStyle(Color.secondary)
         }
     }
 
@@ -129,23 +169,23 @@ struct SettingsView: View {
                 HStack(spacing: 12) {
                     Image(systemName: "stethoscope")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(AppColor.textPrimary)
+                        .foregroundStyle(Color.primary)
                         .frame(width: 24, height: 24)
-                        .background(AppColor.avatarFill)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    Text("diagnostics")
+                        .background(Color(.secondarySystemFill))
+                        .clipShape(Circle())
+                    Text("Diagnostics")
                         .font(.system(size: 15))
-                        .foregroundStyle(AppColor.textPrimary)
+                        .foregroundStyle(Color.primary)
                 }
             }
         } header: {
-            Text("system")
+            Text("System")
                 .font(AppFont.sectionLabel)
-                .foregroundStyle(AppColor.textTertiary)
+                .foregroundStyle(Color.secondary)
         } footer: {
-            Text("connection check, test push preview, contact match diagnostics.")
+            Text("Connection check, test push preview, contact match diagnostics.")
                 .font(AppFont.caption)
-                .foregroundStyle(AppColor.textTertiary)
+                .foregroundStyle(Color.secondary)
         }
     }
 
@@ -159,13 +199,13 @@ struct SettingsView: View {
                 }
             }
         } header: {
-            Text("budgets")
+            Text("Budgets")
                 .font(AppFont.sectionLabel)
-                .foregroundStyle(AppColor.textTertiary)
+                .foregroundStyle(Color.secondary)
         } footer: {
-            Text("set a monthly limit per category. we'll notify you as you approach or cross it.")
+            Text("Set a monthly limit per category. We'll notify you as you approach or cross it.")
                 .font(AppFont.caption)
-                .foregroundStyle(AppColor.textTertiary)
+                .foregroundStyle(Color.secondary)
         }
     }
 
@@ -180,35 +220,35 @@ struct SettingsView: View {
                 HStack(spacing: 12) {
                     Image(systemName: "wand.and.stars")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(AppColor.textPrimary)
+                        .foregroundStyle(Color.primary)
                         .frame(width: 24, height: 24)
-                        .background(AppColor.avatarFill)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    Text("manage rules")
+                        .background(Color(.secondarySystemFill))
+                        .clipShape(Circle())
+                    Text("Manage Rules")
                         .font(.system(size: 15))
-                        .foregroundStyle(AppColor.textPrimary)
+                        .foregroundStyle(Color.primary)
                 }
             }
         } header: {
-            Text("rules")
+            Text("Rules")
                 .font(AppFont.sectionLabel)
-                .foregroundStyle(AppColor.textTertiary)
+                .foregroundStyle(Color.secondary)
         } footer: {
-            Text("rules auto-tag transactions matching contextual patterns — amount range, time of day, distance from a saved location. create them from any category picker.")
+            Text("Rules auto-tag transactions matching contextual patterns — amount range, time of day, distance from a saved location. Create them from any category picker.")
                 .font(AppFont.caption)
-                .foregroundStyle(AppColor.textTertiary)
+                .foregroundStyle(Color.secondary)
         }
     }
 
     private var accountSection: some View {
         Section {
             Button(role: .destructive) { } label: {
-                Text("sign out")
+                Text("Sign Out")
             }
         } header: {
-            Text("account")
+            Text("Account")
                 .font(AppFont.sectionLabel)
-                .foregroundStyle(AppColor.textTertiary)
+                .foregroundStyle(Color.secondary)
         }
     }
 }
@@ -218,22 +258,29 @@ private struct BudgetSummaryRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: budget.category.symbolName)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(AppColor.textPrimary)
-                .frame(width: 24, height: 24)
-                .background(AppColor.avatarFill)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            // Custom category illustration (falls back to its SF Symbol).
+            Group {
+                if let asset = budget.category.spendImageName {
+                    Image(asset).resizable().scaledToFit().padding(3)
+                } else {
+                    Image(systemName: budget.category.symbolName)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.primary)
+                }
+            }
+            .frame(width: 30, height: 30)
+            .background(Color(.secondarySystemFill))
+            .clipShape(Circle())
 
             Text(budget.category.shortName)
                 .font(.system(size: 15))
-                .foregroundStyle(AppColor.textPrimary)
+                .foregroundStyle(Color.primary)
 
             Spacer()
 
             Text(limitString)
                 .font(.system(size: 14, weight: .medium).monospacedDigit())
-                .foregroundStyle(budget.isSet ? AppColor.textPrimary : AppColor.textTertiary)
+                .foregroundStyle(budget.isSet ? Color.primary : Color.secondary)
         }
     }
 
@@ -251,4 +298,5 @@ private struct BudgetSummaryRow: View {
     SettingsView()
         .environment(BudgetStore())
         .environment(ContactsService())
+        .environment(ProfilePhotoStore())
 }

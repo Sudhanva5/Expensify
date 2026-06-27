@@ -139,13 +139,13 @@ export const SEED_ALIASES: AliasEntry[] = [
   { pattern: 'NINTENDO', matchType: 'substring', canonical: 'Nintendo', category: 'Entertainment' },
 
   // ---- Groceries --------------------------------------------------------
-  { pattern: 'BIGBASKET', matchType: 'substring', canonical: 'BigBasket', category: 'Shopping' },
-  { pattern: 'BLINKIT', matchType: 'substring', canonical: 'Blinkit', category: 'Shopping' },
-  { pattern: 'ZEPTO', matchType: 'substring', canonical: 'Zepto', category: 'Shopping' },
-  { pattern: 'INSTAMART', matchType: 'substring', canonical: 'Swiggy Instamart', category: 'Shopping' },
-  { pattern: 'DUNZO', matchType: 'substring', canonical: 'Dunzo', category: 'Shopping' },
-  { pattern: 'DMART', matchType: 'substring', canonical: 'DMart', category: 'Shopping' },
-  { pattern: 'RELIANCE FRESH', matchType: 'substring', canonical: 'Reliance Fresh', category: 'Shopping' },
+  { pattern: 'BIGBASKET', matchType: 'substring', canonical: 'BigBasket', category: 'Groceries' },
+  { pattern: 'BLINKIT', matchType: 'substring', canonical: 'Blinkit', category: 'Groceries' },
+  { pattern: 'ZEPTO', matchType: 'substring', canonical: 'Zepto', category: 'Groceries' },
+  { pattern: 'INSTAMART', matchType: 'substring', canonical: 'Swiggy Instamart', category: 'Groceries' },
+  { pattern: 'DUNZO', matchType: 'substring', canonical: 'Dunzo', category: 'Groceries' },
+  { pattern: 'DMART', matchType: 'substring', canonical: 'DMart', category: 'Groceries' },
+  { pattern: 'RELIANCE FRESH', matchType: 'substring', canonical: 'Reliance Fresh', category: 'Groceries' },
 
   // ---- Investments ------------------------------------------------------
   { pattern: 'ZERODHA', matchType: 'substring', canonical: 'Zerodha', category: 'Investments' },

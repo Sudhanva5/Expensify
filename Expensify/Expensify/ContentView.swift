@@ -8,7 +8,7 @@ struct ContentView: View {
     @State private var showSettings = false
 
     enum Tab: Hashable {
-        case home, categories, activity
+        case home, analytics, activity
     }
 
     var body: some View {
@@ -19,11 +19,11 @@ struct ContentView: View {
                 }
                 .tag(Tab.home)
 
-            CategoriesView(showSettings: $showSettings)
+            AnalyticsView(showSettings: $showSettings)
                 .tabItem {
-                    Label("categories", systemImage: selection == .categories ? "chart.pie.fill" : "chart.pie")
+                    Label("analytics", systemImage: selection == .analytics ? "chart.bar.fill" : "chart.bar")
                 }
-                .tag(Tab.categories)
+                .tag(Tab.analytics)
 
             ActivityView(showSettings: $showSettings)
                 .tabItem {
@@ -47,4 +47,7 @@ struct ContentView: View {
 #Preview {
     ContentView()
         .environment(TransactionStore())
+        .environment(ContactsService())
+        .environment(ProfilePhotoStore())
+        .environment(BudgetStore())
 }

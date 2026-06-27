@@ -8,7 +8,7 @@ Personal expense tracker for a single user. Three deployable units in one repo:
 
 - **Node/TypeScript backend** (`src/`) deployed to Railway as a Fastify server. Ingests HDFC transaction emails + merchant receipts via Gmail → Pub/Sub, categorizes them, persists to Postgres, sends APNs pushes.
 - **SwiftUI iOS app** (`Expensify/`) talks to the backend over HTTPS through a Cloudflare Worker reverse proxy (`cloudflare-worker/`). Round-trips GPS via silent APNs pushes.
-- **MCP server** (`src/mcp/`) deployed as a second Railway service. Read-only Streamable HTTP MCP that exposes the Postgres data to Claude (Desktop / Code / web) over a single bearer-authed endpoint. See `src/mcp/README.md`.
+- **MCP server** (`src/mcp/`) deployed as a second Railway service. Read-only Streamable HTTP MCP that exposes the Postgres data to Claude (Desktop / Code / web). Accepts both a static bearer (`MCP_TOKEN`) and OAuth-issued tokens (`/authorize` → `/token` flow, with `.well-known` discovery). See `src/mcp/README.md`.
 
 Database is PostgreSQL on Railway, accessed exclusively through Prisma. There's no Groq / Brave Search despite the older spec mentioning them — the categorization stack that actually ships is alias-table + VPA-shape + user rules + Google Places. See "Categorization tier chain" below.
 
@@ -62,16 +62,18 @@ src/
 │   ├── middleware/auth.ts             # Bearer-token check (single static API_TOKEN)
 │   └── cron.ts                        # in-process 24h scheduler — refreshes Gmail watch
 ├── gmail/                             # OAuth dance, Pub/Sub message decoder, history walker, MIME body extractor
-├── parsers/hdfc/                      # Per-template parsers (6 templates), all dispatched from index.ts
+├── parsers/hdfc/                      # Per-template parsers (9 templates), all dispatched from index.ts
 │   ├── templates/
 │   │   ├── cc-autopay.ts              # Template C — "set up through E-mandate"
 │   │   ├── cc-autopay-upcoming.ts     # Heads-up email; returns `not_a_transaction`
 │   │   ├── cc-debit.ts                # Template B — "debited from your HDFC Bank Credit Card ending NNNN towards X"
+│   │   ├── cc-thanks.ts               # Template F — "Thank you for using your HDFC Bank Credit Card ending in NNNN" (positive-tone CC charge)
 │   │   ├── cc-upi-debit.ts            # Template E — RuPay CC + UPI (older "has been debited")
 │   │   ├── cc-upi-debit-v2.ts         # Template E v2 — May-2026 reword ("is debited / ending NNNN / DD Mon, YYYY")
+│   │   ├── cc-upi-debit-v3.ts         # Template E v3 — June-2026 reword ("❗ You have done a UPI txn" / RuPay CC UPI)
 │   │   ├── upi-credit.ts              # Template A — inbound UPI to account
 │   │   └── upi-debit.ts               # Template D — outbound UPI to a VPA
-│   └── index.ts                       # Tries templates in order; specific markers BEFORE general ones (v2 before v1; ccUpiDebit before ccDebit; etc.)
+│   └── index.ts                       # Tries templates in order; specific markers BEFORE general ones (v3/v2 before v1; ccThanks/ccUpiDebit before ccDebit; etc.)
 ├── categorize/                        # Pure logic — no DB
 │   ├── index.ts                       # Orchestrator: VPA-pattern → merchant-pattern → autopay-alias → alias → VPA-shape → user-rule
 │   ├── aliases.ts, rules.ts, vpaShape.ts, onlineMerchant.ts
@@ -112,7 +114,7 @@ SwiftUI, iOS 17+ (uses `@Observable`, `@AppStorage`, `ScrollViewReader`). All UI
 
 ### MCP server (`src/mcp/`)
 
-Standalone Fastify process that exposes Postgres data to Claude clients over the Model Context Protocol (Streamable HTTP transport, stateless). 13 read-only tools across four buckets — spend queries, budget status, rule/pattern inspection, and pipeline-debug. Bearer-authed against `MCP_TOKEN` (separate from `API_TOKEN` so they rotate independently). Deployed as a *second* Railway service in the same project (start command `bash scripts/start-mcp.sh`, healthcheck `/health`); the main backend owns the schema and the MCP service is a pure Prisma read client. Detailed deploy + client-config instructions in `src/mcp/README.md`.
+Standalone Fastify process that exposes Postgres data to Claude clients over the Model Context Protocol (Streamable HTTP transport, stateless). 13 read-only tools across four buckets — spend queries, budget status, rule/pattern inspection, and pipeline-debug. Dual auth (`src/mcp/oauth/`): a static bearer (`MCP_TOKEN`, separate from `API_TOKEN` so they rotate independently) for paste-a-token clients, and an OAuth `/authorize` → `/token` flow whose issued tokens are checked against an OAuth-token table. Handlers live in `src/mcp/handlers/` (spend, budgets, rules, details, debug). Deployed as a *second* Railway service in the same project (started by the dispatcher when `RAILWAY_SERVICE_NAME=Expensify-MCP`, healthcheck `/health`); the main backend owns the schema and the MCP service is a pure Prisma read client. Detailed deploy + client-config instructions in `src/mcp/README.md`.
 
 ## Core data flow
 
@@ -156,7 +158,8 @@ The seven V1 categories (`src/categorize/types.ts:CATEGORIES`): Travel, Food, En
 - **Money is always BigInt minor units** in the backend (`amountMinor`, `amountInrMinor`). Never `Number`. Currency conversion preserves both bank-converted INR and source-currency original.
 - **`gmailMessageId` is the idempotency key** for both `Transaction` and `EmailReceipt`. Pub/Sub is at-least-once; every upsert checks this first.
 - **`/health` does NOT touch the DB**. It's a liveness probe. `/health/db` is the readiness probe that pings Postgres. If `/health` returns 5xx when Postgres is down, Railway's healthcheck cascades the whole service down even though Fastify is fine. This split is load-bearing — don't merge them back.
-- **`scripts/start.sh` is the Railway start command.** It retries `prisma migrate deploy` up to 20×3s with backoff, runs the seed best-effort, then `exec npm start`. The server ALWAYS launches even if migrate fails — otherwise a brief Postgres outage permanently kills the service.
+- **`scripts/start-dispatcher.sh` is the single Railway start command** (in `railway.json`). It branches on `RAILWAY_SERVICE_NAME`: `Expensify-MCP` → `start-mcp.sh`, everything else → `start.sh`. Both services run the same code/image; the dispatcher keeps per-service startup version-controlled instead of relying on dashboard overrides.
+- **`scripts/start.sh` is the backend startup (invoked by the dispatcher).** It retries `prisma migrate deploy` up to 20×3s with backoff, runs the seed best-effort, then `exec npm start`. The server ALWAYS launches even if migrate fails — otherwise a brief Postgres outage permanently kills the service.
 - **Gmail OAuth refresh tokens expire after 7 days while the OAuth app is in "Testing" status.** The app needs to be in "In production" (which doesn't require Google verification for a single-user setup, but does show an "unverified app" consent screen) to get persistent refresh tokens. If `invalid_grant` shows up, re-run `scripts/gmail-auth.ts`.
 - **Pub/Sub JWT verification is gated on `GOOGLE_PUBSUB_VERIFICATION_AUDIENCE`.** If unset, the webhook accepts unauthenticated requests with a warning — fine in dev, hardened in prod.
 - **Receipt binding has THREE guards layered**: amount equality, source↔merchant keyword alignment, non-P2P. The order matters; relaxing any one of them re-enables the "random Swiggy email bound to Thimmegowda's Paytm-QR" class of bug.
@@ -167,7 +170,7 @@ The seven V1 categories (`src/categorize/types.ts:CATEGORIES`): Travel, Food, En
 
 ## Deployment + ingest setup
 
-- **Backend**: Railway auto-deploys from `main`. Service uses `railway.json` for build (NIXPACKS, no buildCommand) and start (`bash scripts/start.sh`). Healthcheck timeout 120s, restart policy `ON_FAILURE` max 10.
+- **Backend**: Railway auto-deploys from `main`. Service uses `railway.json` for build (NIXPACKS, no buildCommand) and start (`bash scripts/start-dispatcher.sh`, which routes to `start.sh`/`start-mcp.sh` by service name). Healthcheck timeout 120s, restart policy `ON_FAILURE` max 10.
 - **iOS app**: signed with paid Apple Developer Program cert; built from Xcode. `Constants.baseURL` points at the Cloudflare Worker.
 - **Cloudflare Worker**: `cd cloudflare-worker && wrangler deploy`. Free tier covers 100k req/day. Worker reads no env vars; the Railway origin is hardcoded.
 - **Gmail Pub/Sub** topic: `projects/<gcp-project>/topics/gmail-inbound`. Push subscription `gmail-inbound-push` posts to `https://<host>/webhooks/gmail` with signed JWT audience matching `GOOGLE_PUBSUB_VERIFICATION_AUDIENCE`.

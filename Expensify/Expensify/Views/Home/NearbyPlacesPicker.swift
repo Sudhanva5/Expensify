@@ -17,11 +17,11 @@ struct NearbyPlacesPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("nearby places")
+                Text("Nearby Places")
                     .font(.system(size: 11, weight: .semibold).smallCaps())
                     .foregroundStyle(AppColor.textTertiary)
                 Spacer()
-                Text("tap to tag")
+                Text("Tap to tag")
                     .font(AppFont.caption)
                     .foregroundStyle(AppColor.textTertiary)
             }
@@ -54,24 +54,26 @@ struct NearbyPlacesPicker: View {
         }
         .padding(14)
         .background(AppColor.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(AppColor.hairline, lineWidth: 0.5)
-        )
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     @ViewBuilder
     private func suggestionRow(_ s: PlaceSuggestion) -> some View {
         HStack(spacing: 10) {
-            // Category icon (food fork, basket, popcorn, etc.) on a
-            // warm-tinted square — visually matches the home row chip.
-            Image(systemName: s.resolvedCategory?.symbolName ?? "questionmark")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(AppColor.textPrimary)
-                .frame(width: 28, height: 28)
-                .background(AppColor.avatarFill)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            // Custom category illustration (falls back to its SF Symbol),
+            // in a circle — matches the edit sheet / budget rows.
+            Group {
+                if let cat = s.resolvedCategory, let asset = cat.spendImageName {
+                    Image(asset).resizable().scaledToFit().padding(4)
+                } else {
+                    Image(systemName: s.resolvedCategory?.symbolName ?? "mappin")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(AppColor.textPrimary)
+                }
+            }
+            .frame(width: 32, height: 32)
+            .background(AppColor.avatarFill)
+            .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(s.name)
