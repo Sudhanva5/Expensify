@@ -122,6 +122,7 @@ extension Category {
         case .shopping:      return "CatShopping"
         case .investments:   return "CatInvestments"
         case .subscriptions: return "CatSubscriptions"
+        case .health:        return "CatHealth"
         case .personalTransfer: return "CatP2P"
         }
     }

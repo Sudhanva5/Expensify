@@ -11,6 +11,7 @@ enum Category: String, CaseIterable, Identifiable, Codable, Hashable {
     case personalTransfer = "Personal Transfer (Peer-to-Peer)"
     case investments = "Investments"
     case subscriptions = "Subscriptions"
+    case health = "Health"
 
     var id: String { rawValue }
 
@@ -25,6 +26,7 @@ enum Category: String, CaseIterable, Identifiable, Codable, Hashable {
         case .personalTransfer: return "P2P"
         case .investments: return "Investments"
         case .subscriptions: return "Subscriptions"
+        case .health: return "Health"
         }
     }
 
@@ -41,6 +43,7 @@ enum Category: String, CaseIterable, Identifiable, Codable, Hashable {
         case .personalTransfer: return "person.2"
         case .investments: return "chart.line.uptrend.xyaxis"
         case .subscriptions: return "rectangle.stack.badge.play"
+        case .health: return "cross.case"
         }
     }
 
@@ -55,6 +58,7 @@ enum Category: String, CaseIterable, Identifiable, Codable, Hashable {
         case .personalTransfer: return .purple
         case .investments: return .indigo
         case .subscriptions: return .teal
+        case .health: return .red
         }
     }
 }

@@ -9,6 +9,7 @@ export const CATEGORIES = [
   'Personal Transfer (Peer-to-Peer)',
   'Investments',
   'Subscriptions',
+  'Health',
 ] as const;
 export type CategoryName = (typeof CATEGORIES)[number];
 
