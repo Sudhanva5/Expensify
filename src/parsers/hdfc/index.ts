@@ -5,6 +5,8 @@ import * as ccAutopay from './templates/cc-autopay.js';
 import * as ccAutopayUpcoming from './templates/cc-autopay-upcoming.js';
 import * as ccDebit from './templates/cc-debit.js';
 import * as ccThanks from './templates/cc-thanks.js';
+import * as debitCard from './templates/debit-card.js';
+import * as depositCredit from './templates/deposit-credit.js';
 import * as ccUpiDebit from './templates/cc-upi-debit.js';
 import * as ccUpiDebitV2 from './templates/cc-upi-debit-v2.js';
 import * as ccUpiDebitV3 from './templates/cc-upi-debit-v3.js';
@@ -22,16 +24,25 @@ import { PARSER_VERSION } from './types.js';
 //   cc_thanks ("Thank you for using your HDFC Bank Credit Card") has
 //   a distinctive marker, so its order vs the other CC templates
 //   doesn't matter — placed before the cc-debit variants for grouping.
+//   debit_card sits next to cc_thanks because they share the "Thank you
+//   for using your HDFC Bank ..." opening; Debit vs "Credit Card ending
+//   in" keeps their markers mutually exclusive, so order is not
+//   load-bearing between those two either.
 const TEMPLATES: TemplateParser[] = [
   ccAutopayUpcoming.tryParse,
   ccAutopay.tryParse,
   ccThanks.tryParse,
+  debitCard.tryParse,
   ccUpiDebitV3.tryParse,
   ccUpiDebitV2.tryParse,
   ccUpiDebit.tryParse,
   ccDebit.tryParse,
   upiCredit.tryParse,
   upiDebit.tryParse,
+  // deposit_credit's marker ("You have received a credit in your HDFC
+  // Bank account") shares no wording with upi_credit's, so it sits last
+  // among the inbound templates without ambiguity.
+  depositCredit.tryParse,
 ];
 
 export function parseHdfcEmail(input: HdfcEmailInput): ParseResult {

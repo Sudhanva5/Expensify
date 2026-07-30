@@ -1,0 +1,22 @@
+HDFC BANK
+
+Dear Customer,
+
+You have received a credit in your HDFC Bank account.
+
+Details of the transaction:
+
+Amount received: INR 1,34,513.00
+Account: XX5264
+Date: 30-JUN-2026
+Reference Details: NEFT Cr-ICIC0099999-INTERVIEWBIT SOFTWARE SERVICES PRIVATE LIMITED-S M Sudhanva Acharya-INXXXXXXXXXX4280
+Available Balance: INR 1,35,260.46
+
+For real-time account balance, please call 1800 270 3333.
+
+Thank you for banking with us.
+
+Warm Regards,
+HDFC Bank
+
+© HDFC Bank

@@ -47,17 +47,22 @@ export function parseDdMmYyyy(s: string, receivedAt: Date): Date {
   return istClockToUtc(Number(m[3]), Number(m[2]) - 1, Number(m[1]), receivedAt);
 }
 
-// "17-JUN-26" (DD-MMM-YY, uppercase 3-letter month, 2-digit year). Used
-// by the HDFC balance update email ("as of 17-JUN-26"). Inherits the
-// hh:mm:ss from receivedAt — the email reports a calendar date with no
-// time component, but we want the row's `asOf` to sort correctly
-// alongside transaction occurredAt values that DO carry time.
+// "17-JUN-26" (DD-MMM-YY, uppercase 3-letter month). Used by the HDFC
+// balance update email ("as of 17-JUN-26"). Inherits the hh:mm:ss from
+// receivedAt — the email reports a calendar date with no time component,
+// but we want the row's `asOf` to sort correctly alongside transaction
+// occurredAt values that DO carry time.
+//
+// Also accepts a four-digit year ("30-JUN-2026"), which is what the
+// inbound-credit alert (deposit_credit) uses for the same date shape.
 export function parseDdMmmYy(s: string, receivedAt: Date): Date {
-  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{2})$/.exec(s.trim());
+  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})$/.exec(s.trim());
   if (!m) throw new Error(`bad date (DD-MMM-YY): ${s}`);
   const month = findMonth(m[2]!);
   if (month === null) throw new Error(`bad month: ${m[2]}`);
-  return istClockToUtc(2000 + Number(m[3]), month, Number(m[1]), receivedAt);
+  const yearRaw = Number(m[3]);
+  const year = m[3]!.length === 4 ? yearRaw : 2000 + yearRaw;
+  return istClockToUtc(year, month, Number(m[1]), receivedAt);
 }
 
 // "17-06-2026 21:12:59" (DD-MM-YYYY HH:MM:SS, hyphen-separated date).

@@ -62,7 +62,7 @@ src/
 │   ├── middleware/auth.ts             # Bearer-token check (single static API_TOKEN)
 │   └── cron.ts                        # in-process 24h scheduler — refreshes Gmail watch
 ├── gmail/                             # OAuth dance, Pub/Sub message decoder, history walker, MIME body extractor
-├── parsers/hdfc/                      # Per-template parsers (9 templates), all dispatched from index.ts
+├── parsers/hdfc/                      # Per-template parsers (11 templates), all dispatched from index.ts
 │   ├── templates/
 │   │   ├── cc-autopay.ts              # Template C — "set up through E-mandate"
 │   │   ├── cc-autopay-upcoming.ts     # Heads-up email; returns `not_a_transaction`
@@ -71,8 +71,11 @@ src/
 │   │   ├── cc-upi-debit.ts            # Template E — RuPay CC + UPI (older "has been debited")
 │   │   ├── cc-upi-debit-v2.ts         # Template E v2 — May-2026 reword ("is debited / ending NNNN / DD Mon, YYYY")
 │   │   ├── cc-upi-debit-v3.ts         # Template E v3 — June-2026 reword ("❗ You have done a UPI txn" / RuPay CC UPI)
+│   │   ├── debit-card.ts              # Template G — "Thank you for using your HDFC Bank Debit Card ending NNNN for ATM withdrawal / purchase"
+│   │   ├── deposit-credit.ts          # Template H — inbound NEFT/IMPS/RTGS credit ("You have received a credit in your HDFC Bank account")
 │   │   ├── upi-credit.ts              # Template A — inbound UPI to account
-│   │   └── upi-debit.ts               # Template D — outbound UPI to a VPA
+│   │   └── upi-debit.ts               # Template D — outbound UPI to a VPA, or to a masked account ("to account *******")
+│   ├── balance.ts                     # NOT a transaction — daily balance alert + low-balance threshold alert
 │   └── index.ts                       # Tries templates in order; specific markers BEFORE general ones (v3/v2 before v1; ccThanks/ccUpiDebit before ccDebit; etc.)
 ├── categorize/                        # Pure logic — no DB
 │   ├── index.ts                       # Orchestrator: VPA-pattern → merchant-pattern → autopay-alias → alias → VPA-shape → user-rule
@@ -162,6 +165,8 @@ The seven V1 categories (`src/categorize/types.ts:CATEGORIES`): Travel, Food, En
 - **`scripts/start.sh` is the backend startup (invoked by the dispatcher).** It retries `prisma migrate deploy` up to 20×3s with backoff, runs the seed best-effort, then `exec npm start`. The server ALWAYS launches even if migrate fails — otherwise a brief Postgres outage permanently kills the service.
 - **Gmail OAuth refresh tokens expire after 7 days while the OAuth app is in "Testing" status.** The app needs to be in "In production" (which doesn't require Google verification for a single-user setup, but does show an "unverified app" consent screen) to get persistent refresh tokens. If `invalid_grant` shows up, re-run `scripts/gmail-auth.ts`.
 - **Pub/Sub JWT verification is gated on `GOOGLE_PUBSUB_VERIFICATION_AUDIENCE`.** If unset, the webhook accepts unauthenticated requests with a warning — fine in dev, hardened in prod.
+- **`"View: Account update for your HDFC Bank A/c"` is a shared subject.** HDFC uses that exact subject for the daily balance alert, the low-balance threshold alert, the debit-card ATM/POS alert, NetBanking security notices, AND e-mandate registrations. Never add it to `MARKETING_SUBJECT_PATTERNS` — the debit-card one is real money. Only the body marker can discriminate. Correspondingly, `balance.ts` keys on "balance in your account ending", which the debit-card alert ("available balance **on your card**") deliberately does not match.
+- **HDFC subject lines contain non-breaking spaces (U+00A0).** `isLikelyHdfcAlert` normalizes whitespace before testing `MARKETING_SUBJECT_PATTERNS` — without that, any pattern written with a literal space silently fails to match (this is why the "Scheduled Downtime" mailer leaked for months while `\s+`-based patterns worked fine). Prefer `\s+` or rely on the normalizer; never assume the space is ASCII.
 - **Receipt binding has THREE guards layered**: amount equality, source↔merchant keyword alignment, non-P2P. The order matters; relaxing any one of them re-enables the "random Swiggy email bound to Thimmegowda's Paytm-QR" class of bug.
 - **`AppColor.textPrimary` is near-white in dark mode.** Using it as a *background* on iOS makes white-text-on-white blobs. The Maps button, instrument-dock selected chip, and tab-bar tint all use `AppColor.tap` instead; foreground for those pairs MUST be `AppColor.canvas` (the dynamic inverse), never `.white`.
 - **`isContactOverride` in `TransactionRow`** gates both contact name AND contact photo. It requires the row's category to be nil OR `.personalTransfer` — user-tagged categories win over contact overlay.

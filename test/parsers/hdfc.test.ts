@@ -377,6 +377,137 @@ describe('HDFC parser — upcoming-autopay preview is recognized and skipped', (
   });
 });
 
+describe('HDFC parser — Template D: account-to-account UPI (masked payee)', () => {
+  // Observed 04-Jul-2026: a UPI transfer where the destination is another
+  // bank account rather than a VPA, so HDFC masks it entirely ("to account
+  // *******"). There is no payee name and no VPA to fall back on.
+  it('parses the ₹200 transfer to a masked account', () => {
+    const result = parseHdfcEmail({
+      subject: '❗  You have done a UPI txn. Check details!',
+      body: loadFixture('upi-debit-account-masked.txt'),
+      receivedAt: new Date('2026-07-04T10:36:00Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.template).toBe('upi_debit');
+    expect(result.data.direction).toBe('out');
+    expect(result.data.instrument).toBe('account_5264');
+    expect(result.data.amountMinor).toBe(20000n); // ₹200.00
+    expect(result.data.amountInrMinor).toBe(20000n);
+    expect(result.data.currency).toBe('INR');
+    // No VPA in the wire text — nothing to guess, so it stays null and the
+    // row lands in review for the user to name.
+    expect(result.data.vpa).toBeNull();
+    expect(result.data.merchantRaw).toBe('Account Transfer');
+    expect(result.data.externalRef).toBe('618569394824');
+    expect(result.data.isAutopay).toBe(false);
+  });
+
+  it('still prefers the VPA phrasing when a VPA is present', () => {
+    // Negative control: the masked-account branch must not shadow the
+    // normal "to VPA <vpa> <NAME>" extraction.
+    const result = parseHdfcEmail({
+      subject: '',
+      body: loadFixture('upi-debit-kirana.txt'),
+      receivedAt: new Date('2026-05-05T10:00:00Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.vpa).toBe('q201985284@ybl');
+    expect(result.data.merchantRaw).toBe('SRI GURU RAGHAVENDRA ENTERPRISES');
+  });
+});
+
+describe('HDFC parser — Template G: Debit Card (ATM withdrawal / POS)', () => {
+  // Observed 05-Jul-2026. Arrives under the *same* subject as the balance
+  // alert ("View: Account update for your HDFC Bank A/c"), so the subject
+  // is useless as a discriminator — the body marker is what gates it.
+  it('parses the ₹800 ATM withdrawal on debit card 6812', () => {
+    const result = parseHdfcEmail({
+      subject: 'View: Account update for your HDFC Bank A/c',
+      body: loadFixture('debit-card-atm-withdrawal.txt'),
+      receivedAt: new Date('2026-07-05T07:22:00Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.template).toBe('debit_card');
+    expect(result.data.direction).toBe('out');
+    expect(result.data.instrument).toBe('card_6812');
+    expect(result.data.amountMinor).toBe(80000n); // ₹800.00
+    expect(result.data.amountInrMinor).toBe(80000n);
+    expect(result.data.currency).toBe('INR');
+    expect(result.data.merchantRaw).toBe('SALMAR KARKALA ATM');
+    expect(result.data.vpa).toBeNull();
+    expect(result.data.isAutopay).toBe(false);
+    // 05-07-2026 12:52:09 IST → 07:22:09 UTC
+    expect(result.data.occurredAt.toISOString()).toBe(
+      '2026-07-05T07:22:09.000Z',
+    );
+  });
+
+  it('does not swallow the Credit Card "Thank you for using" alert', () => {
+    // Both templates open with "Thank you for using your HDFC Bank ..." —
+    // the Debit/Credit word is the only discriminator, so guard it.
+    const result = parseHdfcEmail({
+      subject: 'We noticed a transaction on your Credit Card',
+      body: loadFixture('cc-thanks-swiggy.txt'),
+      receivedAt: new Date('2026-06-17T15:43:00Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.template).toBe('cc_thanks');
+  });
+});
+
+describe('HDFC parser — Template H: inbound bank credit (NEFT/IMPS)', () => {
+  // Observed 30-Jun-2026 — a salary credit. Arrives under its own subject
+  // ("New Deposit Alert") and is NOT a UPI credit, so Template A never saw
+  // it. This was the single largest missed amount in the July audit.
+  it('parses the ₹1,34,513 NEFT salary credit', () => {
+    const result = parseHdfcEmail({
+      subject: '❗ New Deposit Alert: Check your A/c balance now!',
+      body: loadFixture('deposit-credit-neft.txt'),
+      receivedAt: new Date('2026-06-30T14:05:49Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.template).toBe('deposit_credit');
+    expect(result.data.direction).toBe('in');
+    expect(result.data.instrument).toBe('account_5264');
+    // Indian digit grouping: "1,34,513.00" → ₹134513.00
+    expect(result.data.amountMinor).toBe(13451300n);
+    expect(result.data.amountInrMinor).toBe(13451300n);
+    expect(result.data.currency).toBe('INR');
+    // Remitter pulled out of the NEFT reference string, not the whole blob.
+    expect(result.data.merchantRaw).toBe(
+      'INTERVIEWBIT SOFTWARE SERVICES PRIVATE LIMITED',
+    );
+    expect(result.data.vpa).toBeNull();
+    expect(result.data.isAutopay).toBe(false);
+    expect(result.data.occurredAt.toISOString().slice(0, 10)).toBe('2026-06-30');
+  });
+
+  it('does not claim UPI credits (Template A keeps those)', () => {
+    const result = parseHdfcEmail({
+      subject: 'You have received money',
+      body: loadFixture('upi-credit-sneha.txt'),
+      receivedAt: new Date('2026-05-10T12:00:00Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.template).toBe('upi_credit');
+  });
+});
+
 describe('HDFC parser — robustness', () => {
   it('returns no_template_match for unrelated promotional email', () => {
     const result = parseHdfcEmail({

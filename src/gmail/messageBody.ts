@@ -178,7 +178,67 @@ const MARKETING_SUBJECT_PATTERNS = [
   /\bpack\s+your\s+bags/i, // travel-loan campaign
   /\boffer\b/i,
   /Update:\s/i, // "A/c xx5264 Update: ..." — HDFC's standard marketing prefix
+
+  // ── Second wave (July 2026) ───────────────────────────────────────
+  // Everything below was observed leaking through the patterns above,
+  // failing every parser, and firing the "parser missed an email" push.
+  // Rule of thumb when extending this list: a real transaction alert
+  // never names a bank *product* or *campaign*, so anchor on those.
+  // In particular do NOT blacklist "Account update" — HDFC uses that
+  // exact subject for both the balance alert and the debit-card ATM
+  // withdrawal alert, and the latter is real money.
+
+  // Statements and investor relations
+  /\bstatement\b/i, // "... Credit Card Statement - July-2026", "Combined Email Statement for ..."
+  /\bfinancial results\b/i, // quarterly results mailer sent to all customers
+  // Service / product notices
+  /\bscheduled downtime\b/i,
+  /\bmissed call\b/i, // "Missed Call from your HDFC Bank Relationship Manager"
+  /\bimportant\s+(?:card\s+)?update\b/i, // "Important Update on your HDFC Bank Card", "Important Card Update"
+  /\bsecurity update\b/i,
+  /\bnetbanking view\b/i,
+  /\bdigipassbook\b/i,
+  /\bcard limits\b/i, // "One app for card limits, transactions & more"
+  /\bpayzapp\b/i,
+  /\bmycards\b/i,
+  /\bbalances and investments\b/i,
+  /\bhappy birthday\b/i,
+  /\bOTP\b/i, // "OTP For online Ecom Transaction" — not a transaction itself
+  // Credit-card upsells
+  /\bsmart\s?emi\b/i, // "SmartEMI" — no word boundary inside, so \bemis?\b misses it
+  /\bprocessing fee\b/i,
+  /\bbest offering\b/i,
+  // Loan / insurance / investment pitches
+  /\blacs?\b/i, // "Rs.7.5 Lacs" — real alerts print "Rs.750000.00"
+  /\bcongrats\b/i, // shorter sibling of the existing \bcongratulations\b
+  /\byour own home\b/i,
+  /\bdream home\b/i,
+  /\binstant funds\b/i,
+  /\bsafety net\b/i,
+  /\bfinancial strength\b/i,
+  /\bno extra cost\b/i,
+  /\breassure\b/i, // ReAssure — an insurance product name
+  // Fraud-awareness campaigns
+  /\bdigital arrest\b/i,
+  /\bdeepfake\b/i,
+  /\btax\s+(?:season|fraud)\b/i,
+  /\bITR\b/i,
+  // Shopping / travel offers
+  /\badd to cart\b/i,
+  /\bis live with\b/i, // "Myntra EORS is live with 10% off"
+  /\bare waiting for you\b/i, // "Cleartrip savings are waiting for you"
+  /\bzero markup\b/i,
 ];
+
+// HDFC's mailer sprinkles non-breaking spaces (U+00A0) and doubled spaces
+// through subject lines — e.g. "⚠️ Scheduled Downtime Alert …". A
+// pattern written with a literal space silently fails to match those,
+// which is how the downtime mailer kept slipping past the blacklist.
+// Collapsing all whitespace to single ASCII spaces first means patterns
+// below can be written the obvious way. (JS `\s` already covers U+00A0,
+// so this also rescues the patterns that use `\s+`.)
+const normalizeSubject = (subject: string): string =>
+  subject.replace(/\s+/g, ' ').trim();
 
 export function isLikelyHdfcAlert(
   fromAddress: string | null,
@@ -189,7 +249,10 @@ export function isLikelyHdfcAlert(
   // Subject is the discriminator between real txn alerts and marketing.
   // If the caller didn't pass one, fall back to "looks like HDFC" — the
   // parser will still cleanly return no_template_match downstream.
-  if (subject && MARKETING_SUBJECT_PATTERNS.some((re) => re.test(subject))) {
+  if (
+    subject &&
+    MARKETING_SUBJECT_PATTERNS.some((re) => re.test(normalizeSubject(subject)))
+  ) {
     return false;
   }
   return true;
