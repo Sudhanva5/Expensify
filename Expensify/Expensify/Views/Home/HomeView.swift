@@ -25,6 +25,10 @@ struct HomeView: View {
     /// a placeholder instead of "₹0.00" zero-state.
     @State private var accountBalances: [AccountBalance] = []
     @State private var balanceLoading: Bool = false
+    /// Set when the last balance fetch threw (offline, 404, auth). Kept
+    /// separate from `accountBalances` so a failed refresh never wipes a
+    /// balance we already have.
+    @State private var balanceUnreachable: Bool = false
     /// Spend tile the user drilled into; drives the category-detail push.
     @State private var selectedSpend: SpendSelection? = nil
 
@@ -289,7 +293,12 @@ struct HomeView: View {
 
     private var asOfText: String {
         guard let p = accountBalances.first else {
-            return "no balance email parsed yet"
+            // Distinguish "the server had nothing for us" from "we never
+            // reached the server". Conflating them cost real debugging
+            // time: the backend was 404ing /account-balance for weeks
+            // while this caption confidently blamed the email parser.
+            if balanceUnreachable { return "couldn't reach server" }
+            return balanceLoading ? "checking…" : "no balance email parsed yet"
         }
         let df = DateFormatter()
         df.dateFormat = "d MMM ''yy"
@@ -314,10 +323,17 @@ struct HomeView: View {
         defer { balanceLoading = false }
         do {
             accountBalances = try await APIClient.shared.fetchAccountBalances()
+            balanceUnreachable = false
         } catch {
-            // Silent fail — chrome stays put, no banner. iOS already
-            // surfaces broader connectivity issues via the existing
-            // .connectivityBanner modifier.
+            // Still no banner — .connectivityBanner covers broad outages,
+            // and a previously-fetched balance is deliberately left on
+            // screen rather than blanked. But record the failure so the
+            // caption can say "couldn't reach server" instead of
+            // implying HDFC never sent us a balance.
+            balanceUnreachable = true
+            #if DEBUG
+            print("[balance] fetch failed: \(error)")
+            #endif
         }
     }
 
