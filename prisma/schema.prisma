@@ -47,6 +47,18 @@ model Transaction {
   /// user types something; treated as no-data by every read path.
   notes          String?  @db.Text
 
+  /// Payment aggregator decoded from an aggregator-minted VPA
+  /// ("netflixupi.payu@hdfcbank" → PayU). Persisted rather than derived
+  /// on read because MCP filters in SQL alongside `take: limit` — a
+  /// post-fetch filter would silently return fewer rows than asked for.
+  /// Written at ingest by upsertTransaction; re-syncable for the whole
+  /// table via scripts/backfill-vpa-merchants.ts when the decoder changes.
+  vpaGateway     String?
+  /// Merchant name decoded from the same VPA ("Netflix"). Stored raw —
+  /// the "is the bank's payee text just an echo of the VPA?" display
+  /// decision stays at read time so it can be tuned without a backfill.
+  vpaMerchant    String?
+
   // Location
   locationLat    Decimal?       @db.Decimal(10, 7)
   locationLng    Decimal?       @db.Decimal(10, 7)
@@ -77,6 +89,7 @@ model Transaction {
   @@index([categoryId, occurredAt])
   @@index([merchantNormalized])
   @@index([status])
+  @@index([vpaGateway])
 }
 
 enum Direction {

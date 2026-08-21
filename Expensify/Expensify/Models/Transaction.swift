@@ -36,6 +36,15 @@ struct Transaction: Identifiable, Hashable {
     /// grounded in the user's own annotation when one exists. Empty
     /// strings are normalised to nil by the backend.
     var notes: String? = nil
+    /// Merchant decoded from an aggregator-minted VPA, supplied by the
+    /// backend only when HDFC's merchant text was a bare echo of the VPA
+    /// itself. Consumed by `displayMerchant` as a fallback beneath the
+    /// bank/Places/user name, never as an override of one.
+    var vpaMerchant: String? = nil
+    /// Payment aggregator that routed this UPI payment ("PayU", "Razorpay").
+    /// Display-only trace — shown in the detail sheet so a spend can be
+    /// traced back to the checkout it came from.
+    var vpaGateway: String? = nil
 
     enum LocationStatus: String, Codable, Hashable {
         case awaiting
@@ -90,11 +99,35 @@ extension Transaction {
     /// name (e.g. "RAJESH KUMAR"). Falls back to raw when they're identical
     /// (which is the case before any resolution happens).
     var displayMerchant: String {
+        // Places / alias / user renames still win outright.
         if !merchantNormalized.isEmpty,
            merchantNormalized.caseInsensitiveCompare(merchantRaw) != .orderedSame {
             return merchantNormalized
         }
+        // Nothing better on file, and the bank only echoed the VPA back at
+        // us ("snitchapparelsp711507.rzp"). The gateway-decoded name is
+        // strictly more readable than that. The backend already checked the
+        // echo condition — a populated vpaMerchant means it's safe to use.
+        if let vpaMerchant, !vpaMerchant.isEmpty {
+            return vpaMerchant
+        }
         return merchantRaw
+    }
+
+    /// Stable key for favicon lookup, deliberately decoupled from
+    /// `displayMerchant`. Tracks the *bank-side* identity so renaming a row
+    /// to "Manju Tea Stall" doesn't chase a Manju favicon and drop the
+    /// stable Paytm-QR / brand logo.
+    ///
+    /// The gateway-decoded name is allowed in here (unlike a user rename)
+    /// precisely because it IS bank-side — it's derived from the VPA HDFC
+    /// sent us. It also comes first, because a raw payee that's a bare VPA
+    /// echo ("snitchapparelsp711507.rzp") resolves no favicon at all,
+    /// whereas "Snitch" resolves the real one.
+    var brandKey: String {
+        if let vpaMerchant, !vpaMerchant.isEmpty { return vpaMerchant }
+        if !merchantRaw.isEmpty { return merchantRaw }
+        return vpa ?? ""
     }
 
     /// True if we have a Places-resolved business name distinct from the raw payee.

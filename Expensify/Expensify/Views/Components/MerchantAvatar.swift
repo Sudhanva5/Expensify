@@ -3,7 +3,7 @@ import SwiftUI
 /// Circular merchant avatar.
 ///   • If we recognize the merchant → render a Google favicon
 ///   • Else if the row has a category → its bundled illustration
-///   • Otherwise → two-letter initials on a warm-tinted circle
+///   • Otherwise → two-letter initials on a neutral-gray circle
 ///
 /// AsyncImage handles loading + caching automatically. While the favicon
 /// loads (or if it fails), we show the fallback so the row is never blank.

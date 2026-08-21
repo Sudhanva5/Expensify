@@ -1,73 +1,80 @@
 import SwiftUI
 import UIKit
 
-/// Color palette. Warm-tinted neutrals — every gray has a hint of the same
-/// warm hue so the surface feels like a single material in both light and
-/// dark mode. Saturated colors are reserved for signal: inflow green,
-/// tap-affordance blue.
+/// Color palette. True neutrals — every gray is achromatic (R == G == B),
+/// so no surface carries a hue of its own and the only color on screen is
+/// signal: inflow green, tap-affordance blue, over-budget red.
+///
+/// These were warm-tinted (a brown cast through every gray) until it read
+/// as sepia rather than as a material. Neutral grays were chosen at the
+/// *same perceptual luminance* as the warm values they replaced, so the
+/// contrast ratios that were tuned for AA are unchanged — only the hue is
+/// gone. Keep it that way: a token whose channels aren't equal is a bug
+/// unless it's an accent.
 ///
 /// Every token is a dynamic color that resolves at render time based on
 /// the active `userInterfaceStyle`. Per Apple HIG dark-mode guidance:
 ///   • Don't invert — design the dark palette as its own coherent
-///     surface. The warm tint that defines our light mode carries
-///     into dark as a warm near-black, not cold blue-black.
+///     surface, not a mirror of light.
 ///   • Reduce saturation on the dark side; heavy chroma at low
 ///     luminance reads as garish.
 ///   • Lift accent brightness slightly in dark — green/blue glyphs
 ///     need extra punch against a near-black surface to keep WCAG
 ///     contrast at AA.
 ///   • Pure black (#000) is for OLED-power-savings apps; this is a
-///     content app so we use a warm near-black instead.
+///     content app so we use a near-black instead.
 ///
 /// Helper at bottom of file: `Color.dynamic(light:dark:)`.
 enum AppColor {
     /// Page background.
-    ///   light: barely-warm off-white, slightly warmer than system default
-    ///   dark:  warm near-black (not pure black — pure black on OLED is
-    ///          flat and loses our warmth identity)
+    ///   light: neutral off-white, a shade below pure white so `surface`
+    ///          (which IS pure white) can still lift off it
+    ///   dark:  neutral near-black (not pure black — pure black on OLED
+    ///          reads flat and kills the layering against `surface`)
     static let canvas = Color.dynamic(
-        light: Color(red: 0.985, green: 0.978, blue: 0.968),
-        dark:  Color(red: 0.090, green: 0.082, blue: 0.072)
+        light: Color(red: 0.978, green: 0.978, blue: 0.978),
+        dark:  Color(red: 0.083, green: 0.083, blue: 0.083)
     )
 
     /// A raised surface — settings sections, sheet bodies, the receipt
     /// card. Slightly lighter than canvas so layering reads visually.
     static let surface = Color.dynamic(
         light: Color.white,
-        dark:  Color(red: 0.140, green: 0.128, blue: 0.115)
+        dark:  Color(red: 0.130, green: 0.130, blue: 0.130)
     )
 
-    /// Primary text. Warm near-black in light; warm near-white in dark.
+    /// Primary text. Near-black in light; near-white in dark.
     static let textPrimary = Color.dynamic(
-        light: Color(red: 0.130, green: 0.115, blue: 0.100),
-        dark:  Color(red: 0.962, green: 0.948, blue: 0.918)
+        light: Color(red: 0.117, green: 0.117, blue: 0.117),
+        dark:  Color(red: 0.949, green: 0.949, blue: 0.949)
     )
 
     /// Secondary text — for labels, subtitles, dates. Both modes keep
     /// roughly 60% contrast against the canvas.
     static let textSecondary = Color.dynamic(
-        light: Color(red: 0.500, green: 0.460, blue: 0.420),
-        dark:  Color(red: 0.660, green: 0.622, blue: 0.575)
+        light: Color(red: 0.466, green: 0.466, blue: 0.466),
+        dark:  Color(red: 0.627, green: 0.627, blue: 0.627)
     )
 
     /// Tertiary text — for de-emphasized info (the ".00" decimal,
     /// hairline labels).
     static let textTertiary = Color.dynamic(
-        light: Color(red: 0.700, green: 0.660, blue: 0.620),
-        dark:  Color(red: 0.475, green: 0.445, blue: 0.412)
+        light: Color(red: 0.666, green: 0.666, blue: 0.666),
+        dark:  Color(red: 0.449, green: 0.449, blue: 0.449)
     )
 
     /// Hairline divider. Almost invisible but enough to separate sections.
     static let hairline = Color.dynamic(
-        light: Color(red: 0.900, green: 0.870, blue: 0.840),
-        dark:  Color(red: 0.215, green: 0.198, blue: 0.180)
+        light: Color(red: 0.874, green: 0.874, blue: 0.874),
+        dark:  Color(red: 0.200, green: 0.200, blue: 0.200)
     )
 
     /// Subtle background for avatars without logos (initials), category
-    /// icons in pickers, etc. Slightly warmer than the canvas.
+    /// icons in pickers, etc. One step off the canvas so the circle reads
+    /// as a filled shape rather than a hole.
     static let avatarFill = Color.dynamic(
-        light: Color(red: 0.940, green: 0.900, blue: 0.850),
-        dark:  Color(red: 0.200, green: 0.182, blue: 0.162)
+        light: Color(red: 0.905, green: 0.905, blue: 0.905),
+        dark:  Color(red: 0.184, green: 0.184, blue: 0.184)
     )
 
     /// Inflow accent. Used only for positive amounts (money received).
@@ -82,8 +89,8 @@ enum AppColor {
     /// at a glance — toolbar buttons, avatar initials, selected category
     /// icons, the contact-pin glyph, the Maps button background.
     ///
-    /// Light: a slightly warm, deep cobalt that holds its own against
-    /// the off-white canvas without feeling generic-iOS-blue.
+    /// Light: a deep cobalt that holds its own against the off-white
+    /// canvas without feeling generic-iOS-blue.
     /// Dark: lifted brighter blue so it stays legible at AA contrast
     /// against the near-black canvas.
     ///

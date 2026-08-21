@@ -128,9 +128,7 @@ struct TransactionDetailSheet: View {
             MerchantAvatar(
                 merchantName: primaryTitle,
                 size: 60,
-                brandKey: transaction.merchantRaw.isEmpty
-                    ? transaction.vpa ?? ""
-                    : transaction.merchantRaw,
+                brandKey: transaction.brandKey,
                 contactImageData: contactImageData,
                 contactName: contactName,
                 categoryFallback: transaction.category
@@ -171,6 +169,29 @@ struct TransactionDetailSheet: View {
                 AmountText(amount: transaction.amountInr, direction: transaction.direction, size: 18)
             }
             .padding(14)
+
+            if let gateway = transaction.vpaGateway {
+                // Payment-rail trace. UPI carries no referrer or URL, so the
+                // aggregator decoded out of the VPA is the closest thing to
+                // "which checkout did this come from" that exists.
+                Divider().overlay(AppColor.hairline)
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 20))
+                        .foregroundStyle(AppColor.textSecondary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Paid Via")
+                            .font(.system(size: 10, weight: .semibold).smallCaps())
+                            .foregroundStyle(AppColor.textTertiary)
+                        Text(gateway)
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(AppColor.textPrimary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                }
+                .padding(14)
+            }
 
             if hasMap {
                 // Whole map embed is tappable → opens Maps. The Map itself

@@ -16,7 +16,7 @@ import { rulesRoute } from './server/routes/rules.js';
 import { contactsRoute } from './server/routes/contacts.js';
 import { mcpAdminRoute } from './server/routes/mcpAdmin.js';
 import { accountBalancesRoute } from './server/routes/accountBalances.js';
-import { scheduleWatchRefresh } from './server/cron.js';
+import { scheduleWatchRefresh, scheduleLocationSweep } from './server/cron.js';
 
 export async function buildServer() {
   const app = Fastify({
@@ -51,6 +51,7 @@ if (isDirectRun) {
       const addr = await app.listen({ port, host: '0.0.0.0' });
       console.log(`API listening on ${addr}`);
       scheduleWatchRefresh(app);
+      scheduleLocationSweep(app);
     })
     .catch((err) => {
       console.error(err);

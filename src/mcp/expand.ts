@@ -65,6 +65,15 @@ export function expandTransaction(
     // remember which tools project it; helps the LLM ground answers
     // in the user's own annotation when one exists.
     notes: r.notes,
+    // Decoded out of aggregator-minted VPAs at ingest. `gateway` is the
+    // rail the money took (PayU, Razorpay, Cashfree); `vpaMerchant` is the
+    // merchant named inside the VPA, which is often present when the bank's
+    // own payee text is just an echo of the VPA string. Both null for
+    // ordinary person-to-person and non-aggregator VPAs. Note that UPI
+    // carries no URL or referrer — this is a registered merchant name, not
+    // a website.
+    gateway: r.vpaGateway,
+    vpaMerchant: r.vpaMerchant,
   };
 
   if (includes.has('location')) {

@@ -10,6 +10,16 @@ struct TransactionDTO: Codable {
     let merchantRaw: String
     let merchantNormalized: String
     let vpa: String?
+    /// Merchant name decoded from an aggregator-minted VPA
+    /// (`snitchapparelsp711507.rzp@rxaxis` → "Snitch"). Backend only
+    /// populates this when HDFC's own merchant text was a useless echo of
+    /// the VPA — when the bank sent a real trading name, this stays null and
+    /// that name is used instead.
+    let vpaMerchant: String?
+    /// Payment aggregator that routed the UPI payment ("PayU", "Razorpay",
+    /// "Cashfree"). Present far more often than `vpaMerchant` — an opaque
+    /// merchant id still tells us which rail it took.
+    let vpaGateway: String?
     let direction: String
     let instrument: String
     let occurredAt: String        // ISO 8601
@@ -112,7 +122,9 @@ struct TransactionDTO: Codable {
                     formattedAddress: $0.formattedAddress
                 )
             },
-            notes: notes
+            notes: notes,
+            vpaMerchant: vpaMerchant,
+            vpaGateway: vpaGateway
         )
     }
 }

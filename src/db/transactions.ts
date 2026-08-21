@@ -4,6 +4,7 @@
 import { prisma } from './client.js';
 import type { ParsedTransaction } from '../parsers/hdfc/index.js';
 import type { CategorizationResult } from '../categorize/types.js';
+import { decodeVpaMerchant } from '../categorize/vpaMerchant.js';
 
 export interface InsertTransactionInput {
   parsed: ParsedTransaction;
@@ -31,6 +32,12 @@ export async function upsertTransaction(
 
   const status =
     categorization.status === 'auto_resolved' ? 'resolved' : 'pending_review';
+
+  // Aggregator-minted VPAs name both the merchant and the rail that routed
+  // the payment. Frozen onto the row at ingest so MCP can filter on gateway
+  // in SQL; re-sync the whole table with scripts/backfill-vpa-merchants.ts
+  // after any change to the decoder.
+  const decodedVpa = parsed.vpa ? decodeVpaMerchant(parsed.vpa) : null;
 
   // GPS is meaningful for ANY in-person spend. We only opt out when
   // the row is structurally without a physical context:
@@ -69,6 +76,8 @@ export async function upsertTransaction(
       merchantRaw: parsed.merchantRaw,
       merchantNormalized: categorization.merchantNormalized,
       vpa: parsed.vpa,
+      vpaGateway: decodedVpa?.gateway ?? null,
+      vpaMerchant: decodedVpa?.merchant ?? null,
       occurredAt: parsed.occurredAt,
       direction: parsed.direction,
       instrument: parsed.instrument,
@@ -118,4 +127,29 @@ export async function markLocationMissed(transactionId: string): Promise<void> {
     where: { id: transactionId },
     data: { locationStatus: 'missed' },
   });
+}
+
+/**
+ * Bulk-transition `awaiting` rows older than `cutoff` to `missed`.
+ *
+ * Every row born as an outflow starts `awaiting` and previously had exactly
+ * one exit: a successful GPS upload from iOS. Any dropped silent push left
+ * the row stuck there permanently, which (a) renders "locating…" forever in
+ * the iOS chip and (b) crowds still-recoverable rows out of the `take: 50`
+ * awaiting list so the foreground backfill never sees them.
+ *
+ * Cutoff policy lives in pipeline/locationLifecycle.ts — this is the thin
+ * data-access half. Returns the number of rows transitioned.
+ */
+export async function expireStaleAwaitingLocations(
+  cutoff: Date,
+): Promise<number> {
+  const result = await prisma.transaction.updateMany({
+    where: {
+      locationStatus: 'awaiting',
+      occurredAt: { lt: cutoff },
+    },
+    data: { locationStatus: 'missed' },
+  });
+  return result.count;
 }

@@ -41,9 +41,7 @@ struct TransactionRow: View {
                 // name. Otherwise renaming a row to "Manju Tea Stall"
                 // would chase a Manju favicon that doesn't exist,
                 // dropping the actually-stable Paytm-QR / brand logo.
-                brandKey: transaction.merchantRaw.isEmpty
-                    ? transaction.vpa ?? ""
-                    : transaction.merchantRaw,
+                brandKey: transaction.brandKey,
                 contactImageData: contactImageData,
                 contactName: effectiveContactName,
                 // Falls back to the category SF Symbol when there's no

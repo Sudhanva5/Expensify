@@ -71,6 +71,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // backgrounded) and run the location backfill for awaiting txns.
         Task { await HTTPClient.shared.warmup(baseURL: Constants.baseURL) }
         Task {
+            // Warm the spend-time buffer BEFORE the backfill reads it. The
+            // user frequently opens the app within a minute or two of paying,
+            // and that fix is a legitimate sample for the transaction that
+            // just landed — but only if it's in the buffer before
+            // backfillFromForeground() does its lookup. Debounced internally,
+            // so a foreground/background flap costs nothing.
+            await LocationService.shared.captureIntoBufferIfNeeded()
             await BackfillService.shared.backfillFromForeground()
         }
     }

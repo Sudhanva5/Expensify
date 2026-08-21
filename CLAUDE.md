@@ -12,13 +12,17 @@ Personal expense tracker for a single user. Three deployable units in one repo:
 
 Database is PostgreSQL on Railway, accessed exclusively through Prisma. There's no Groq / Brave Search despite the older spec mentioning them — the categorization stack that actually ships is alias-table + VPA-shape + user rules + Google Places. See "Categorization tier chain" below.
 
+`.impeccable.md` at the repo root is the iOS **design context** (users, brand personality, color/typography/spacing rules, component inventory). Read it before touching SwiftUI views — it's the reasoning behind `Theme/Tokens.swift`, not decoration. `docs/UI_MOCKUPS.md` holds screen mockups.
+
 ## Common commands
 
 ```bash
 # Dev loop
 npm run typecheck                                  # tsc --noEmit, run before commits
 npm run test:run                                   # vitest, one-shot
+npm test                                           # vitest watch mode
 npx vitest run test/parsers/hdfc.test.ts           # single test file
+npx vitest run -t "cc_upi_debit"                   # single test by name
 npm start                                          # tsx src/server.ts (local)
 PORT=3001 MCP_TOKEN=dev npm run start:mcp          # local MCP server, separate process from npm start
 
@@ -27,6 +31,7 @@ npm run db:migrate                                 # prisma migrate dev — gene
 npm run db:migrate:deploy                          # prisma migrate deploy — applies pending migrations without prompts (used by Railway start.sh)
 npm run db:seed                                    # idempotent: categories, ROUTING_PREFIXES, alias rows
 npm run db:reset                                   # nuke + re-migrate + re-seed (DESTRUCTIVE on whatever DATABASE_URL points at)
+npm run db:generate                                # prisma generate (also runs on postinstall)
 npx prisma studio                                  # GUI on the linked DB
 
 # Gmail OAuth + watch (rare; needed when refresh token expires or scopes change)
@@ -40,6 +45,8 @@ GOOGLE_PLACES_API_KEY=... npx tsx scripts/refresh-places-by-vpa.ts --all      # 
 npx tsx scripts/google-contacts-sync.ts            # rebuilds GoogleContact cache via People API
 npx tsx scripts/unbind-mismatched-receipts.ts      # sweeps EmailReceipt rows; unbinds any where source/merchant alignment fails or the tx is a P2P VPA
 npx tsx scripts/backfill-rules.ts                  # walks every tx with GPS, applies enabled user rules at auto-tag confidence (dry-run unless --apply)
+npx tsx scripts/backfill-vpa-merchants.ts          # re-decodes Transaction.vpaGateway/vpaMerchant from the VPA (dry-run unless --apply).
+                                                   #   MUST be re-run after any edit to src/categorize/vpaMerchant.ts — the decode is persisted, not derived on read
 
 # Cloudflare Worker reverse proxy (deploys independently from the backend)
 cd cloudflare-worker && npx wrangler deploy        # prints the *.workers.dev URL; iOS Constants.swift baseURL points at it
@@ -58,9 +65,10 @@ Test suite is fully offline — parser, categorizer, Gmail body extractor, recei
 src/
 ├── server.ts                          # Fastify entrypoint, registers all routes
 ├── server/
-│   ├── routes/                        # gmailWebhook, devices, transactions, budgets, rules, contacts, health
+│   ├── routes/                        # gmailWebhook, devices, transactions, budgets, rules, contacts,
+│   │                                  #   accountBalances, mcpAdmin, health
 │   ├── middleware/auth.ts             # Bearer-token check (single static API_TOKEN)
-│   └── cron.ts                        # in-process 24h scheduler — refreshes Gmail watch
+│   └── cron.ts                        # two in-process timers: 24h Gmail-watch refresh, hourly stale-`awaiting` location sweep
 ├── gmail/                             # OAuth dance, Pub/Sub message decoder, history walker, MIME body extractor
 ├── parsers/hdfc/                      # Per-template parsers (11 templates), all dispatched from index.ts
 │   ├── templates/
@@ -76,25 +84,32 @@ src/
 │   │   ├── upi-credit.ts              # Template A — inbound UPI to account
 │   │   └── upi-debit.ts               # Template D — outbound UPI to a VPA, or to a masked account ("to account *******")
 │   ├── balance.ts                     # NOT a transaction — daily balance alert + low-balance threshold alert
+│   ├── dateMoney.ts                   # shared `parseMinorUnits` / `parseDdMmmYy` used by every template
 │   └── index.ts                       # Tries templates in order; specific markers BEFORE general ones (v3/v2 before v1; ccThanks/ccUpiDebit before ccDebit; etc.)
 ├── categorize/                        # Pure logic — no DB
 │   ├── index.ts                       # Orchestrator: VPA-pattern → merchant-pattern → autopay-alias → alias → VPA-shape → user-rule
 │   ├── aliases.ts, rules.ts, vpaShape.ts, onlineMerchant.ts
-│   └── types.ts                       # CATEGORIES (7-item const), confidence threshold, RuleConditions JSONB shape
+│   ├── vpaMerchant.ts                 # `decodeVpaMerchant()` — pulls merchant + aggregator out of a VPA
+│   │                                  #   ("netflixupi.payu@hdfcbank" → Netflix / PayU). Gated behind classifyVpa
+│   │                                  #   so a personal VPA is never renamed. NOT a categorization tier — see below
+│   ├── seed.ts                        # ROUTING_PREFIXES + ~138 curated MerchantAlias rows + autopay aliases (source of truth, copied into DB by prisma/seed.ts)
+│   └── types.ts                       # CATEGORIES (9-item const), confidence threshold, RuleConditions JSONB shape
 ├── receipts/extractors.ts             # Per-source parsers: Swiggy, Instamart, redBus, MakeMyTrip + universal fallback. pickExtractor() routes by from-address.
 ├── pipeline/
 │   ├── processGmailMessage.ts         # HDFC ingest: parser → categorize → upsertTransaction → optional silent-push → budget check
 │   ├── processReceiptEmail.ts         # Receipt ingest: pickExtractor → tryBindToTransaction (amount + ±90min window + source-keyword + P2P guard)
 │   ├── recategorizeWithLocation.ts    # Runs after iOS uploads GPS: P2P + online guards → user-rule eval → Places lookup → persist suggestions
-│   └── budgetAlerts.ts                # MTD recompute; fires push only once per (month, threshold) key
+│   ├── budgetAlerts.ts                # MTD recompute; fires push only once per (month, threshold) key
+│   └── locationLifecycle.ts           # pure policy: how long a row may sit `awaiting` (24h) before the cron retires it
 ├── services/
 │   ├── apns.ts                        # sendVisiblePush, sendSilentLocationPush, sendParserMissedAlert
-│   ├── places.ts                      # Google Places (New) wrapper, STRICT_DISTANCE_M = 30
+│   ├── places.ts                      # Google Places (New) wrapper. Radius is a caller arg (default 100m); the 30m
+│   │                                  #   STRICT_DISTANCE_M haversine filter lives in recategorizeWithLocation.ts
 │   ├── placesTypeMapper.ts            # `restaurant` → Food, etc.
 │   └── googleContacts.ts              # People API sync + lookupByVpa (phone-tail first, then strict-token name match)
 └── db/                                # Pure data-access (Prisma calls only, no business logic)
     ├── client.ts, transactions.ts, emailMessages.ts, aliases.ts
-    ├── userRules.ts, merchantPatterns.ts, vpaPatterns.ts
+    ├── userRules.ts, merchantPatterns.ts, vpaPatterns.ts, accountBalances.ts
     └── categorizeContext.ts           # Builds CategorizeContext from DB rows for the orchestrator at request time
 ```
 
@@ -102,14 +117,18 @@ src/
 
 SwiftUI, iOS 17+ (uses `@Observable`, `@AppStorage`, `ScrollViewReader`). All UI talks to backend via `APIClient` (which goes through HTTPClient with retry/backoff).
 
-- `Models/` — wire types (`Transaction`, `Category`, `UserRule`, `Budget`, `PlaceSuggestion`, `ReceiptDetails`).
+- `Models/` — wire types (`Transaction`, `Category`, `UserRule`, `Budget`, `PlaceSuggestion`, `ReceiptDetails`, `AccountBalance`, `MCPDiagnostics`, `ReviewItem`, `DateRange`).
 - `Services/`
   - `TransactionStore` — single source of truth, `@Observable`; `refresh()`, `retag()`, `applyPlace()` (the "claim a Places suggestion" + "rename merchant" backend).
   - `ContactsService` — privacy-critical: iOS Contacts NEVER leaves the device. Phone-tail match (UPI VPA `9876543210@ybl` → CN phone) is preferred; strict token-overlap fallback. Google-contacts lookup is a separate path that DOES go to the server but only ever sees a VPA.
-  - `BudgetStore`, `LocationService` (CLLocationManager + Significant Location Changes), `PushService` (APNs token registration).
-- `Theme/Tokens.swift` — single source of color truth. Every token is `Color.dynamic(light:dark:)`. `AppColor.tap` is the accent (blue); when used as a *background* (Maps button, selected instrument-dock chip), the foreground MUST be `AppColor.canvas`, never `.white` literal — `.white` literal on tap turns invisible in dark mode.
+  - `LocationService` — CLLocationManager + Significant Location Changes, plus a **spend-time buffer**: recent fixes are retained so a transaction can be matched to where the user was *when they spent*, not where they are when the app wakes. SLC only fires on ~500m of movement, so `captureIntoBufferIfNeeded()` also warms the buffer on foreground (debounced on the same clock as the opportunistic SLC capture) — sitting still in a café would otherwise leave the buffer with nothing near the spend.
+  - `BackfillService` — runs on `applicationDidBecomeActive`; catches up `awaiting_location` rows when the silent push never woke the app (Low Power Mode, APNs throttling). Prefers `LocationService.closestEntry(to: occurredAt)` over a fresh fix.
+  - `NetworkMonitor` — NWPathMonitor; `HTTPClient` subscribes and drops stale TCP connections after a Wi-Fi↔cellular handoff (the usual cause of "first request after coming back online fails").
+  - `BudgetStore`, `PushService` (APNs token registration), `ProfilePhotoStore` (on-device avatar JPEG, never uploaded), `CurrentUser` (hardcoded single-user name/email), `MerchantBranding` (favicon/brand-key resolution), `MockData`.
+- `Theme/Tokens.swift` — single source of color truth. Every token is `Color.dynamic(light:dark:)`. Neutral tokens (canvas, surface, text*, hairline, avatarFill) are **achromatic — R == G == B**; they were warm-tinted until the brown cast read as sepia, and the neutral values sit at the same perceptual luminance so AA contrast is unchanged. Unequal channels on a non-accent token is a bug. Only `inflow`, `tap`, and `AnalyticsView.overColor` carry hue. `AppColor.tap` is the accent (blue); when used as a *background* (Maps button, selected instrument-dock chip), the foreground MUST be `AppColor.canvas`, never `.white` literal — `.white` literal on tap turns invisible in dark mode.
 - `Theme/ThemePreference.swift` — system/light/dark override stored in `@AppStorage`. Wired through `.preferredColorScheme(...)` at the root.
-- `Views/` — by tab: `Home/`, `Categories/`, `Activity/` (review queue) + `Settings/` + reusable `Components/`.
+- `Theme/LiquidGlass.swift` — `.glassControl(shape:tint:)`. Use this for custom controls (icon buttons, filter FAB) instead of hand-painting `AppColor` fills; it uses the iOS 26 `glassEffect` material with a tinted-surface fallback on older iOS.
+- `Views/` — by tab: `Home/`, `Categories/`, `Activity/` (review queue) + `Settings/` (incl. `DiagnosticsView` — MCP health + OAuth token revocation, backed by `/mcp-admin`) + reusable `Components/`.
 
 ### Cloudflare Worker (`cloudflare-worker/`)
 
@@ -117,7 +136,19 @@ SwiftUI, iOS 17+ (uses `@Observable`, `@AppStorage`, `ScrollViewReader`). All UI
 
 ### MCP server (`src/mcp/`)
 
-Standalone Fastify process that exposes Postgres data to Claude clients over the Model Context Protocol (Streamable HTTP transport, stateless). 13 read-only tools across four buckets — spend queries, budget status, rule/pattern inspection, and pipeline-debug. Dual auth (`src/mcp/oauth/`): a static bearer (`MCP_TOKEN`, separate from `API_TOKEN` so they rotate independently) for paste-a-token clients, and an OAuth `/authorize` → `/token` flow whose issued tokens are checked against an OAuth-token table. Handlers live in `src/mcp/handlers/` (spend, budgets, rules, details, debug). Deployed as a *second* Railway service in the same project (started by the dispatcher when `RAILWAY_SERVICE_NAME=Expensify-MCP`, healthcheck `/health`); the main backend owns the schema and the MCP service is a pure Prisma read client. Detailed deploy + client-config instructions in `src/mcp/README.md`.
+Standalone Fastify process that exposes Postgres data to Claude clients over the Model Context Protocol (Streamable HTTP transport, **stateless** — every POST builds a fresh `McpServer` + transport pair, closed when the response ends). 18 read-only tools registered from `src/mcp/handlers/`:
+
+| Handler | Tools |
+| --- | --- |
+| `spend.ts` | `list_transactions`, `monthly_summary`, `top_merchants`, `total_by_category`, `search_merchant` |
+| `budgets.ts` | `current_budget_status`, `budget_history` |
+| `rules.ts` | `list_user_rules`, `list_vpa_patterns`, `list_merchant_patterns` |
+| `details.ts` | `get_transaction`, `recent_receipts`, `list_tags`, `list_goals`, `get_account_balances`, `list_instruments` |
+| `debug.ts` | `unparsed_hdfc_emails`, `unbound_receipts`, `recent_email_messages` |
+
+`expand.ts` implements the opt-in `expand` argument on transaction-returning tools (`receipt` / `places` / `location` / `fx` / `email`) so the default shape stays lightweight; `formatters.ts` does the minor-units → rupee rendering. `list_transactions` also takes a `gateway` filter (closed vocabulary from `vpaMerchant.ts`, matched `equals`-insensitive — a `contains` match could only ever add false positives), and `search_merchant` searches `vpaMerchant` alongside `merchantRaw`/`merchantNormalized`/`vpa` because for aggregator rows the searchable name exists *only* in the decoded column.
+
+Dual auth (`src/mcp/oauth/`): a static bearer (`MCP_TOKEN`, separate from `API_TOKEN` so they rotate independently) for paste-a-token clients, and an OAuth `/authorize` → `/token` flow whose issued tokens are checked against `McpAccessToken`. Unauthenticated `/mcp` requests get a 401 with an RFC 9728 `WWW-Authenticate` pointing at `/.well-known/oauth-protected-resource`. Deployed as a *second* Railway service in the same project (started by the dispatcher when `RAILWAY_SERVICE_NAME=Expensify-MCP`, healthcheck `/health`); the main backend owns the schema and the MCP service is a pure Prisma read client. Token administration is the **main backend's** job, not the MCP service's — `/mcp-admin/*` (API_TOKEN-authed) reads/revokes `McpAccessToken` rows directly and pings `MCP_PUBLIC_URL/health` for the iOS Diagnostics screen. Detailed deploy + client-config instructions in `src/mcp/README.md`.
 
 ## Core data flow
 
@@ -132,6 +163,8 @@ Inbound HDFC email:
 7. iPhone wakes via the silent push, captures GPS (`LocationService.fetchOnce`), POSTs to `/transactions/:id/location`.
 8. `recategorizeWithLocation()` then: skips if alias / merchant_pattern / user_rule / places / autopay_alias already resolved → P2P guard → online-merchant guard → tries enabled location-aware user rules at auto-tag confidence → Google Places lookup (30m strict radius) → persists top-5 suggestions on the row.
 
+`locationStatus = 'awaiting'` has exactly **two** exits: a successful GPS upload from iOS, or the hourly cron sweep (`scheduleLocationSweep` → `expireStaleAwaitingLocations`) flipping rows older than `AWAITING_GRACE_MS` (24h) to `missed`. Without the sweep, every dropped silent push (force-quit, Low Power Mode, APNs throttling) stranded a row rendering "locating…" forever, and — because `GET /transactions/awaiting` is `take: 50` ordered by `occurredAt desc` — the backlog pushed still-recoverable rows out of the list so the iOS foreground backfill could never see them. The sweep deliberately does not *guess* a location; `missed` is honest, "wherever the user was when the app next opened" is not.
+
 Inbound receipt email (Swiggy / Zomato / Amazon / redBus / MakeMyTrip / Uber / Ola / Rapido / etc.):
 
 1. Same Gmail → Pub/Sub → webhook path.
@@ -143,6 +176,13 @@ Inbound receipt email (Swiggy / Zomato / Amazon / redBus / MakeMyTrip / Uber / O
    - non-P2P guard (`classifyVpa(vpa) !== 'personal'`)
 4. Receipt row persisted; if exactly one aligned candidate found, `transactionId` is set.
 
+Inbound HDFC **balance** alert (third path — not a transaction):
+
+1. Same Gmail → Pub/Sub → webhook path; same shared subject as the debit-card alert.
+2. `parseBalance()` (`src/parsers/hdfc/balance.ts`) keys on the body marker `balance in your account ending` — deliberately NOT matching the debit-card alert's "available balance **on your card**", which must fall through to the transaction parser chain.
+3. Upserts `AccountBalance` (`instrument` shaped like `account_5264`, `balanceInrMinor`, `asOf`).
+4. iOS reads it via `GET /account-balance` (plural wire shape, single-account V1) and renders the Home balance card.
+
 ## Categorization tier chain
 
 When the orchestrator runs, signals are pushed in this order; the first one at ≥0.95 confidence auto-tags. All others go to `pending_review`.
@@ -150,11 +190,13 @@ When the orchestrator runs, signals are pushed in this order; the first one at �
 1. **VPA pattern** (`VpaPattern`) — 1-hit threshold. User tags one Surendra Shetty row → every row on `q454981412@ybl` flips to that category. Also stores `merchantName` so future debits adopt the renamed display name.
 2. **Merchant pattern** (`MerchantPattern`) — 3-hit threshold on `merchantNormalized`. Catches cases where VPA varies but the bank text is stable.
 3. **Autopay alias** (`MerchantAlias` tagged `autopay:`) — fires only on `cc_autopay` template emails. Maps "Anthropic" → Subscriptions etc.
-4. **Merchant alias** (`MerchantAlias`) — curated seed data (~119 rows). Routing-prefix strip first (`RAZ*`, `PAYU*`, `CCD*`, etc.).
+4. **Merchant alias** (`MerchantAlias`) — curated seed data (~138 rows in `src/categorize/seed.ts`). Routing-prefix strip first (`RAZ*`, `PAYU*`, `CCD*`, etc.).
 5. **VPA shape** (`classifyVpa`) — `q\d+@ybl` → merchant, `firstname.lastname@oksbi` → personal (auto-tags as Personal Transfer at 0.95). The list of personal/merchant handles is hardcoded in `src/categorize/vpaShape.ts`.
 6. **User rules** — JSONB conditions, evaluated by `evaluateRule()`. Conditions include `direction`, `instrument`, `amountBetween`, `timeOfDayBetween` (IST), `dayOfWeek`, `payeeContains`, `payeeRegex`, `payeeNotInAliasTable`, `vpaShape`, `locationWithinRadius`. Location-aware rules only evaluate inside `recategorizeWithLocation()` once GPS is known.
 
-The seven V1 categories (`src/categorize/types.ts:CATEGORIES`): Travel, Food, Entertainment, **Shopping** (formerly "Groceries / Kirana Stores"), Personal Transfer (Peer-to-Peer), Investments, Subscriptions.
+There is deliberately **no "alias via decoded VPA merchant" tier**. It was built and measured against the full history and rescued zero rows: the alias table matches by substring, so `netflixupi.payu` already hits the NETFLIX pattern in tier 4. The rows tier 4 misses (Snitch, Swish, District) miss because they have no alias row at all — a seed-data gap. Fix those by adding the alias row, not by adding a tier. (The comment in `src/categorize/index.ts` says the same; don't re-derive it.)
+
+The nine categories (`src/categorize/types.ts:CATEGORIES`): Travel, Food, Entertainment, Shopping, Groceries, Personal Transfer (Peer-to-Peer), Investments, Subscriptions, Health. Shopping and Groceries are now **separate** (Shopping was briefly the merged bucket). Adding a category means touching three places in lockstep: `CATEGORIES` in `src/categorize/types.ts`, the `Category` enum in `Expensify/Expensify/Models/Category.swift` (raw values must match the strings exactly — they're the wire format), and a re-run of `npm run db:seed`.
 
 ## Invariants and gotchas
 
@@ -170,7 +212,11 @@ The seven V1 categories (`src/categorize/types.ts:CATEGORIES`): Travel, Food, En
 - **Receipt binding has THREE guards layered**: amount equality, source↔merchant keyword alignment, non-P2P. The order matters; relaxing any one of them re-enables the "random Swiggy email bound to Thimmegowda's Paytm-QR" class of bug.
 - **`AppColor.textPrimary` is near-white in dark mode.** Using it as a *background* on iOS makes white-text-on-white blobs. The Maps button, instrument-dock selected chip, and tab-bar tint all use `AppColor.tap` instead; foreground for those pairs MUST be `AppColor.canvas` (the dynamic inverse), never `.white`.
 - **`isContactOverride` in `TransactionRow`** gates both contact name AND contact photo. It requires the row's category to be nil OR `.personalTransfer` — user-tagged categories win over contact overlay.
-- **`MerchantAvatar.brandKey`** decouples the renameable display name from the favicon lookup. Favicon resolves from `transaction.merchantRaw` (or VPA); title resolves from `displayMerchant`/contact/rename. Without this, renaming a row would also change the favicon — wrong because the bank-side identity hasn't changed.
+- **`MerchantAvatar.brandKey`** decouples the renameable display name from the favicon lookup. Every call site passes `Transaction.brandKey` (`vpaMerchant` → `merchantRaw` → `vpa`) — never `merchantRaw` inline; title resolves separately from `displayMerchant`/contact/rename. Without this split, renaming a row would also change the favicon — wrong because the bank-side identity hasn't changed. The gateway-decoded `vpaMerchant` is allowed in `brandKey` (a user rename is not) precisely because it *is* bank-side: it comes out of the VPA HDFC sent, and it comes first because a bare VPA echo resolves no favicon while "Snitch" resolves the real one.
+- **`LocationService.allowsBackgroundLocationUpdates` MUST stay `true`.** `fetchOnce` drives `startUpdatingLocation()` and its most important caller is the silent-push handler, which runs backgrounded by definition; with `false`, that wake routinely timed out `.noLocation`. This is not continuous tracking — `fetchOnce` stops the stream on the first accurate-enough reading and nothing else starts one. `pausesLocationUpdatesAutomatically` is correspondingly `false`: auto-pause targets navigation-length sessions and just starves a 6–15s burst. The `location` UIBackgroundModes entry this requires is already in Info.plist (setting the flag without it traps at runtime).
+- **VPA merchant/gateway: persisted at ingest, *displayed* by policy at read time.** `upsertTransaction` freezes `decodeVpaMerchant(vpa)` into `Transaction.vpaGateway` / `vpaMerchant` — persisted (not derived on read) because MCP filters on gateway in SQL alongside `take: limit`, and a post-fetch filter would silently return fewer rows than asked. Consequences: (a) decoder changes are **not** retroactive — run `scripts/backfill-vpa-merchants.ts --apply`; (b) `vpaMerchant` is stored raw and `GET /transactions` only emits it when `isMerchantRawAnEchoOfVpa(merchantRaw, vpa)`, so a real bank-sent trading name always wins and the policy is tunable without a backfill. iOS never arbitrates — `displayMerchant` treats a populated `vpa_merchant` as already-safe. The decoder never invents a name: opaque ids (`paytm.d15687920262`, `q385969427`) return a gateway with a `null` merchant. UPI carries no referrer or URL, so this is a registered merchant name, never a website.
+- **Custom iOS controls use `.glassControl(...)`, not hand-painted `AppColor` fills.** Standard iOS styling is a project rule; `Theme/LiquidGlass.swift` is the one place that branches on iOS 26 availability.
+- **`/mcp-admin/*` is authed with `API_TOKEN`, not `MCP_TOKEN`.** It lives on the main backend so iOS keeps one bearer for everything, and it writes the MCP token tables directly rather than proxying through the MCP service.
 - **Web-domain favicon resolution** runs an "inner brand extraction" pipeline (`MerchantBranding.extractInnerBrand`): strips payment-rail prefixes (`amznpl`, `gpay-`, `paytm-`, etc.), trailing transaction IDs, and corporate suffixes (`pvtltd`, `services`, `india`). Lets `amznplpvrv2033702` resolve to PVR's favicon.
 
 ## Deployment + ingest setup

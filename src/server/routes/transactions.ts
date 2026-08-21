@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { prisma } from '../../db/client.js';
 import { requireApiToken } from '../middleware/auth.js';
 import { recategorizeWithLocation } from '../../pipeline/recategorizeWithLocation.js';
+import { isMerchantRawAnEchoOfVpa } from '../../categorize/vpaMerchant.js';
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
@@ -101,6 +102,15 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
 
       return rows.map((r) => {
         const receipt = r.receipts[0];
+        // Gateway + decoded merchant are persisted at ingest. The
+        // *display* decision stays here on purpose: `vpa_merchant` is only
+        // sent when HDFC gave us nothing but a copy of the VPA. When the
+        // bank sent a real trading name that name wins, so iOS never has
+        // to arbitrate — and this policy can be tuned without a backfill.
+        const vpaMerchant =
+          r.vpaMerchant && r.vpa && isMerchantRawAnEchoOfVpa(r.merchantRaw, r.vpa)
+            ? r.vpaMerchant
+            : null;
         return {
           id: r.id,
           amount_inr_minor: r.amountInrMinor !== null ? Number(r.amountInrMinor) : Number(r.amountMinor),
@@ -108,6 +118,8 @@ export async function transactionsRoute(app: FastifyInstance): Promise<void> {
           merchant_raw: r.merchantRaw,
           merchant_normalized: r.merchantNormalized,
           vpa: r.vpa,
+          vpa_merchant: vpaMerchant,
+          vpa_gateway: r.vpaGateway,
           direction: r.direction,
           instrument: r.instrument,
           occurred_at: r.occurredAt.toISOString(),

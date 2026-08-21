@@ -232,10 +232,10 @@ struct HomeView: View {
                     let w = geo.size.width
                     let h = geo.size.height
 
-                    // Lettering sits on the brown front pocket (lower ⅔ of
+                    // Lettering sits on the black front pocket (lower ⅔ of
                     // the wallet). Ink is FIXED white, not a dynamic token —
-                    // the brown artwork doesn't flip in dark mode, so the
-                    // text stays white in both. Balance is refreshed by the
+                    // the artwork doesn't flip in dark mode, so the text
+                    // stays white in both. Balance is refreshed by the
                     // page's pull-to-refresh, so there's no inline button.
                     VStack(spacing: 3) {
                         Text("Account Balance")
@@ -250,7 +250,13 @@ struct HomeView: View {
                             .foregroundStyle(walletInk.opacity(0.6))
                     }
                     .frame(width: w * 0.82)
-                    .position(x: w / 2, y: h * 0.69)
+                    // Fraction, not a fixed offset, so the lettering tracks
+                    // the pocket at any card width. 0.66 (not the old 0.69)
+                    // because the artwork is taller now (1168×890 vs
+                    // 913×581) and its pocket starts higher. The +8 on top
+                    // is a hand-tuned nudge down, kept separate so the
+                    // artwork-derived fraction stays readable as such.
+                    .position(x: w / 2, y: h * 0.66 + 8)
                 }
             }
             .accessibilityElement(children: .combine)
@@ -258,10 +264,10 @@ struct HomeView: View {
                                  ?? "Account balance unavailable")
     }
 
-    /// Fixed white ink for lettering on the brown wallet artwork.
+    /// Fixed white ink for lettering on the black wallet artwork.
     /// Deliberately NOT a dynamic AppColor token — the wallet PNG doesn't
     /// flip in dark mode, so the text stays white in both or it'd vanish
-    /// against the brown leather.
+    /// against the black leather.
     private let walletInk = Color.white
 
     /// Hero balance lettering — standard SF Pro throughout. The ₹ glyph is

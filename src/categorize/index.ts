@@ -121,6 +121,14 @@ export async function categorize(
     }
   }
 
+  // No "alias via decoded VPA merchant" tier here, deliberately. It was
+  // built and measured against the full transaction history: it rescued
+  // ZERO rows. The alias table matches by substring, so an aggregator VPA
+  // echo like "netflixupi.payu" already hits the NETFLIX pattern through
+  // the plain Tier 1 above. The cases Tier 1 misses (Snitch, Swish,
+  // District) miss because those merchants have no alias row at all —
+  // a seed-data gap, not a matching-strategy gap. Add the alias row.
+
   // Tier 2 — VPA shape
   //
   // Boosted to 0.95 (was 0.7) so personal-VPA transfers auto-tag as P2P

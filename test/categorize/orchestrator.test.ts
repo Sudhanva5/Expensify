@@ -212,5 +212,3 @@ describe('categorize — pick logic', () => {
     expect(result.status).toBe('needs_review');
   });
 });
-
-

@@ -62,10 +62,26 @@ final class LocationService: NSObject, @unchecked Sendable {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
-        // SLC + foreground bursts. We're not subscribing to standard updates
-        // continuously, so backgroundLocationUpdates stays off.
-        manager.allowsBackgroundLocationUpdates = false
-        manager.pausesLocationUpdatesAutomatically = true
+
+        // MUST be true. `fetchOnce` drives `startUpdatingLocation()`, and its
+        // single most important caller is the silent-push handler — which by
+        // definition runs while the app is backgrounded. Continuous updates
+        // are suspended in the background unless this is set, so the old
+        // `false` meant Tier-2 fetchOnce routinely timed out with
+        // `.noLocation` during exactly the wake it exists to serve. (The
+        // `location` UIBackgroundModes entry this requires is already in
+        // Info.plist; setting this without it would trap at runtime.)
+        //
+        // This does NOT mean we track continuously: `fetchOnce` stops the
+        // stream the moment it has an accurate-enough reading, and nothing
+        // else calls `startUpdatingLocation`. Background cost stays bounded
+        // by the one-shot's own timeout.
+        manager.allowsBackgroundLocationUpdates = true
+
+        // Auto-pause is a power optimisation for long-running navigation-style
+        // sessions. Our sessions are 6-15 second bursts; iOS pausing one
+        // mid-flight just starves the one-shot of readings.
+        manager.pausesLocationUpdatesAutomatically = false
     }
 
     var authorizationStatus: CLAuthorizationStatus { manager.authorizationStatus }
@@ -331,6 +347,50 @@ final class LocationService: NSObject, @unchecked Sendable {
     // one-shot is in flight). Runs a brief high-accuracy fetchOnce so the
     // buffer carries a sub-30m entry for this location, NOT just the
     // 500m SLC reading.
+
+    /// Put a fresh, accurate entry in the spend-time buffer *now*, and wait
+    /// for it to land.
+    ///
+    /// The buffer's whole job is to answer "where was the user at
+    /// `occurredAt`?", but it was only ever written from SLC ticks — which
+    /// fire on ~500m of movement. Sit still in a café and the buffer has
+    /// nothing anywhere near your spend, so both the silent-push Tier-1
+    /// lookup and the foreground backfill miss and the row strands.
+    ///
+    /// Foregrounding is the cheap fix: the user very often opens the app
+    /// within a couple of minutes of paying, and that moment is a legitimate
+    /// spend-time sample. Debounced on the same clock as the opportunistic
+    /// SLC capture so a burst of foreground/background cycles can't spin GPS.
+    ///
+    /// Failures are swallowed — this is best-effort buffer warming, never a
+    /// blocking step.
+    func captureIntoBufferIfNeeded() async {
+        lock.lock()
+        let last = lastOpportunisticCaptureAt
+        lock.unlock()
+
+        if let last,
+           Date().timeIntervalSince(last) < Self.opportunisticDebounceSeconds {
+            #if DEBUG
+            print("[LocationService] foreground capture skipped — last capture \(Int(Date().timeIntervalSince(last)))s ago")
+            #endif
+            return
+        }
+        lock.lock()
+        lastOpportunisticCaptureAt = Date()
+        lock.unlock()
+
+        do {
+            _ = try await fetchOnce(minimumAccuracyMeters: 30, timeoutSeconds: 8)
+            #if DEBUG
+            print("[LocationService] foreground capture: buffer warmed")
+            #endif
+        } catch {
+            #if DEBUG
+            print("[LocationService] foreground capture failed (non-fatal): \(error)")
+            #endif
+        }
+    }
 
     private func opportunisticCaptureIfNeeded() {
         lock.lock()

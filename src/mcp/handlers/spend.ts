@@ -65,6 +65,12 @@ export function registerSpendTools(server: McpServer): void {
         status: z
           .enum(['awaiting_location', 'pending_review', 'resolved'])
           .optional(),
+        gateway: z
+          .string()
+          .optional()
+          .describe(
+            'Payment aggregator that routed the UPI payment, decoded from the payee VPA. Exact, case-insensitive: "PayU", "Razorpay", "Cashfree", "Juspay", "BillDesk", "Paytm", "CCAvenue", "BharatQR". Use for "what did I pay through PayU this quarter". Only UPI rows routed via an aggregator carry one; card and P2P rows do not.',
+          ),
         limit: z.number().int().min(1).max(100).default(25),
         include: IncludeArg,
       },
@@ -75,6 +81,12 @@ export function registerSpendTools(server: McpServer): void {
       if (args.instrument) where.instrument = args.instrument;
       if (args.status) where.status = args.status;
       if (args.category) where.category = { name: args.category };
+      if (args.gateway) {
+        // Equals-insensitive rather than contains: gateway values are a
+        // closed vocabulary written by our own decoder, so a substring
+        // match would only ever create false positives.
+        where.vpaGateway = { equals: args.gateway, mode: 'insensitive' };
+      }
       if (args.merchantContains) {
         const q = args.merchantContains;
         where.OR = [
@@ -309,6 +321,9 @@ export function registerSpendTools(server: McpServer): void {
             { merchantNormalized: { contains: q, mode: 'insensitive' } },
             { merchantRaw: { contains: q, mode: 'insensitive' } },
             { vpa: { contains: q, mode: 'insensitive' } },
+            // "Snitch" only exists in the decoded column — the bank text
+            // for that row is the bare VPA echo "snitchapparelsp711507.rzp".
+            { vpaMerchant: { contains: q, mode: 'insensitive' } },
           ],
         },
         orderBy: { occurredAt: 'desc' },

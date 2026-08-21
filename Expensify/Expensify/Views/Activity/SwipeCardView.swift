@@ -94,11 +94,9 @@ struct SwipeCardView: View {
                 MerchantAvatar(
                     merchantName: item.transaction.displayMerchant,
                     size: 56,
-                    // Stable favicon source — bank's raw text, not the
+                    // Stable favicon source — bank-side identity, not the
                     // renameable display name.
-                    brandKey: item.transaction.merchantRaw.isEmpty
-                        ? item.transaction.vpa ?? ""
-                        : item.transaction.merchantRaw
+                    brandKey: item.transaction.brandKey
                 )
 
                 VStack(alignment: .leading, spacing: 2) {
