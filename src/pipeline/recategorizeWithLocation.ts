@@ -62,24 +62,10 @@ export async function recategorizeWithLocation(opts: {
   });
   if (!tx) return { updated: false, reason: 'transaction_not_found' };
 
-  // Cheap top-level filters that DON'T need Places — bail without
-  // burning an API call for inbound rows or online merchants.
+  // Cheap top-level filter that doesn't need Places — an inbound row has
+  // no storefront to resolve, so bail without burning an API call.
   if (tx.direction !== 'out') {
     return { updated: false, reason: 'not_outflow' };
-  }
-  // Online-merchant guard — DUPLICATED here on purpose. The check in
-  // processGmailMessage prevents NEW online-merchant rows from being
-  // sent through this pipeline at all, but historical rows already
-  // have GPS uploaded. If a backfill or manual re-run calls
-  // recategorizeWithLocation on a "NAME-CHEAP.COM*" row, we'd happily
-  // map it to the nearest physical grocery store — exactly the bug
-  // we fixed before. Belt-and-suspenders: bail out here too.
-  const onlineCheck = detectOnlineMerchant(tx.merchantRaw);
-  if (onlineCheck.isOnline) {
-    return {
-      updated: false,
-      reason: `online_merchant_${onlineCheck.reason}`,
-    };
   }
 
   // Ask Places for a 30m sample so the haversine filter at STRICT_DISTANCE_M
@@ -154,6 +140,25 @@ export async function recategorizeWithLocation(opts: {
   ]);
   if (tx.status === 'resolved' && tx.signalSource && TRUSTED_SOURCES.has(tx.signalSource)) {
     return { updated: false, reason: `already_resolved_${tx.signalSource}` };
+  }
+
+  // Online-merchant guard. Every outflow now reaches this function — the
+  // ingest-time opt-out is gone (see pipeline/locationLifecycle.ts) — so
+  // this is the ONLY thing standing between a Namecheap domain renewal and
+  // being renamed "Groceries / Vishal Mega Mart" because the user happened
+  // to be near a supermarket. Same shape for a Swiggy order: the food came
+  // to the flat, so the restaurant across the road is not where it happened.
+  //
+  // Positioned AFTER the suggestion write on purpose. A flagged row still
+  // gets its nearby places persisted for the iOS picker; we only decline to
+  // pick one automatically. Costs one Places call per online charge, which
+  // buys the user a one-tap correction instead of typing the name by hand.
+  const onlineCheck = detectOnlineMerchant(tx.merchantRaw);
+  if (onlineCheck.isOnline) {
+    return {
+      updated: false,
+      reason: `online_merchant_${onlineCheck.reason}`,
+    };
   }
 
   // P2P guard — the GPay-rail equivalent of the online-merchant guard.

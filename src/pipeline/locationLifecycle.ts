@@ -20,6 +20,44 @@
 export const AWAITING_GRACE_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * Does a freshly-parsed transaction want a GPS round-trip?
+ *
+ * Every outflow does. This used to consult `detectOnlineMerchant` on the
+ * bank's payee text and skip the round-trip when it looked like a website,
+ * and that classifier was wrong in both directions on real data:
+ *
+ *   • "paytm-57338997" — a petrol pump in Electronic City, reached through
+ *     a Paytm terminal — matched the PAYTM rail prefix and was suppressed.
+ *     No GPS, no Places suggestions, merchant name typed in by hand.
+ *   • "PHP*REDBUS" — a bus booked from the sofa — did NOT match, because
+ *     the pattern was anchored at `^` and the acquirer prefix came first.
+ *     Silent push fired for a spend with no storefront.
+ *
+ * A payment rail carries in-person QR terminals and web checkouts alike,
+ * so its prefix cannot answer this question. Asking every time is both
+ * simpler and more accurate: the cost of a needless GPS ping is one silent
+ * push the sweep later retires as `missed`, while the cost of a wrongly
+ * skipped one is a permanently context-free transaction.
+ *
+ * The two exclusions that remain are structural rather than statistical —
+ * they hold no matter what the payee text says:
+ *   • inflow — somebody paid you; you weren't necessarily anywhere.
+ *   • autopay — an e-mandate bill is charged in the cloud on the bank's
+ *     schedule, quite possibly while you're asleep.
+ *
+ * `detectOnlineMerchant` still runs later, inside recategorizeWithLocation,
+ * to decide the narrower question of whether Places may auto-RENAME a row.
+ */
+export function initialLocationStatus(tx: {
+  direction: 'in' | 'out';
+  isAutopay: boolean;
+}): 'awaiting' | 'not_applicable' {
+  if (tx.direction === 'in') return 'not_applicable';
+  if (tx.isAutopay) return 'not_applicable';
+  return 'awaiting';
+}
+
+/**
  * Should this awaiting row be transitioned to `missed`?
  *
  * Future-dated rows are never expired: HDFC timestamps come from the bank's

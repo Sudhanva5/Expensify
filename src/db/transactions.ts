@@ -5,6 +5,7 @@ import { prisma } from './client.js';
 import type { ParsedTransaction } from '../parsers/hdfc/index.js';
 import type { CategorizationResult } from '../categorize/types.js';
 import { decodeVpaMerchant } from '../categorize/vpaMerchant.js';
+import { initialLocationStatus } from '../pipeline/locationLifecycle.js';
 
 export interface InsertTransactionInput {
   parsed: ParsedTransaction;
@@ -12,11 +13,6 @@ export interface InsertTransactionInput {
   gmailMessageId: string;
   rawSubject: string;
   rawSnippet: string;
-  /// If true, mark locationStatus as 'not_applicable' regardless of the
-  /// usual heuristic. Set by processGmailMessage for online merchants
-  /// (Namecheap, Anthropic, etc.) where iPhone GPS is meaningless and
-  /// would otherwise let iOS try to backfill location for the row.
-  isOnlineMerchant?: boolean;
 }
 
 // Returns { id, created } — created=false means we hit the idempotency guard.
@@ -39,24 +35,13 @@ export async function upsertTransaction(
   // after any change to the decoder.
   const decodedVpa = parsed.vpa ? decodeVpaMerchant(parsed.vpa) : null;
 
-  // GPS is meaningful for ANY in-person spend. We only opt out when
-  // the row is structurally without a physical context:
-  //   • autopay (subscription bill — billed in the cloud)
-  //   • inflow (somebody paid you — you weren't necessarily anywhere)
-  //   • online merchant (Namecheap, Anthropic, etc.)
-  //
-  // Alias-resolved merchants USED TO opt out too ("we already know
-  // this is Swiggy, no need to ask the phone"), but that suppressed
-  // useful context — which Swiggy outlet, which Uber pickup point,
-  // which MakeMyTrip booking from where. Now alias-resolved rows
-  // still go through the GPS round-trip; the user gets the physical
-  // location attached to every real-world spend.
-  const locationStatus =
-    parsed.isAutopay ||
-    parsed.direction === 'in' ||
-    input.isOnlineMerchant
-      ? 'not_applicable'
-      : 'awaiting';
+  // Every outflow gets the GPS round-trip. Policy (and the reasoning for
+  // why the online-merchant classifier no longer has a vote here) lives in
+  // pipeline/locationLifecycle.ts.
+  const locationStatus = initialLocationStatus({
+    direction: parsed.direction,
+    isAutopay: parsed.isAutopay,
+  });
 
   // Try to find existing row first (idempotency)
   const existing = await prisma.transaction.findUnique({

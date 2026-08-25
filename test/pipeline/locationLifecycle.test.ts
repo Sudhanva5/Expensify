@@ -2,9 +2,37 @@ import { describe, it, expect } from 'vitest';
 import {
   AWAITING_GRACE_MS,
   isAwaitingExpired,
+  initialLocationStatus,
 } from '../../src/pipeline/locationLifecycle.js';
 
 const HOUR = 60 * 60 * 1000;
+
+describe('initialLocationStatus', () => {
+  it('awaits location for an ordinary outflow', () => {
+    expect(initialLocationStatus({ direction: 'out', isAutopay: false })).toBe('awaiting');
+  });
+
+  // The whole point of the change: the online-merchant classifier no longer
+  // gets to veto the GPS round-trip. "paytm-57338997" (a petrol pump) was
+  // suppressed by it; "PHP*REDBUS" slipped through it. Neither decision
+  // was better than just asking every time.
+  it('awaits location regardless of how online the payee looks', () => {
+    for (const merchant of ['paytm-57338997', 'PHP*REDBUS', 'NAME-CHEAP.COM* S0EXHV', 'SWIGGY PVT LTD FOOD2']) {
+      expect(
+        initialLocationStatus({ direction: 'out', isAutopay: false }),
+        merchant,
+      ).toBe('awaiting');
+    }
+  });
+
+  it('skips inflows — somebody paying you puts you nowhere in particular', () => {
+    expect(initialLocationStatus({ direction: 'in', isAutopay: false })).toBe('not_applicable');
+  });
+
+  it('skips autopay — an e-mandate bill is charged in the cloud', () => {
+    expect(initialLocationStatus({ direction: 'out', isAutopay: true })).toBe('not_applicable');
+  });
+});
 
 describe('isAwaitingExpired', () => {
   const now = new Date('2026-08-20T12:00:00Z');
