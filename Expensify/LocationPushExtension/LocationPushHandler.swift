@@ -57,6 +57,7 @@ final class LocationPushHandler: NSObject, CLLocationPushServiceExtension {
             let kind = payload["kind"] as? String, kind == "request_location",
             let transactionId = payload["transactionId"] as? String
         else {
+            SharedLocationStore.recordWake(.badPayload)
             finish()
             return
         }
@@ -88,6 +89,7 @@ final class LocationPushHandler: NSObject, CLLocationPushServiceExtension {
             withinSeconds: 10 * 60,
             withMinAccuracy: 100
         ) {
+            SharedLocationStore.recordWake(.bufferHit)
             await upload(transactionId: transactionId, lat: entry.lat, lng: entry.lng)
             return
         }
@@ -95,7 +97,10 @@ final class LocationPushHandler: NSObject, CLLocationPushServiceExtension {
         // Tier 2 — no buffer entry, but the spend is recent enough that the
         // phone's current position is still an honest answer.
         let spendAge = -occurredAt.timeIntervalSinceNow
-        guard spendAge <= 2 * 60 else { return }
+        guard spendAge <= 2 * 60 else {
+            SharedLocationStore.recordWake(.declined)
+            return
+        }
 
         let fix = LocationFix()
         self.fix = fix
@@ -103,9 +108,11 @@ final class LocationPushHandler: NSObject, CLLocationPushServiceExtension {
             maxAcceptableAccuracy: Self.maxAcceptableAccuracy,
             timeout: Self.fixTimeout
         ) else {
+            SharedLocationStore.recordWake(.declined)
             return
         }
 
+        SharedLocationStore.recordWake(.freshFix)
         // Feed the buffer as well: this fix is also evidence for any *other*
         // row that lands near this timestamp, and in Low Power Mode the app
         // itself may not run for hours.

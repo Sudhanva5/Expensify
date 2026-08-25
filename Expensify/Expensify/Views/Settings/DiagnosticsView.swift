@@ -227,6 +227,12 @@ struct DiagnosticsView: View {
                 fixHint: "turn off low power mode, then settings → general → background app refresh"
             )
             preconditionRow(
+                title: "location-push wakes",
+                ok: SharedLocationStore.wakeCount > 0,
+                detail: locationPushWakeDetail,
+                fixHint: "no wake recorded yet — send a location test push to check"
+            )
+            preconditionRow(
                 title: "shared location buffer",
                 ok: SharedLocationStore.isSharedContainerAvailable,
                 detail: SharedLocationStore.isSharedContainerAvailable
@@ -271,6 +277,18 @@ struct DiagnosticsView: View {
             }
             Spacer()
         }
+    }
+
+    /// Reads the log the extension leaves in the App Group. "0 wakes" after
+    /// a test push means iOS never delivered it; a wake that "declined" means
+    /// delivery works and the row simply had no honest location to report.
+    private var locationPushWakeDetail: String {
+        let count = SharedLocationStore.wakeCount
+        guard count > 0, let last = SharedLocationStore.lastWakeAt else {
+            return "none recorded"
+        }
+        let outcome = SharedLocationStore.lastWakeOutcome ?? "unknown"
+        return "\(count) total — last \(relativeTime(last)): \(outcome)"
     }
 
     private var locationAuthDetail: String {

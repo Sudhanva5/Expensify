@@ -107,6 +107,49 @@ enum SharedLocationStore {
         }
     }
 
+    // MARK: - Location-push wake log
+    //
+    // The extension runs in a process with no UI, no debugger attached, and
+    // no reachable console once the phone is off the cable — so "did the
+    // location push actually wake us?" was unanswerable from either side.
+    // The push succeeds at APNs whether or not iOS delivers it, and the
+    // extension declining for a good reason (spend too old, no buffer entry)
+    // looks identical to never having run. That ambiguity is what made the
+    // original Low Power Mode failure take a day to find.
+    //
+    // So every wake stamps the shared container. Cheap, and it turns the
+    // Diagnostics screen into a real answer.
+
+    static let wakeCountKey = "expensify.locationPushWakeCount"
+    static let lastWakeAtKey = "expensify.locationPushLastWakeAt"
+    static let lastWakeOutcomeKey = "expensify.locationPushLastOutcome"
+
+    /// What a location-push wake managed to do. Recorded even when the
+    /// answer is "nothing" — a decline is a successful wake, and telling
+    /// the two apart is the entire point of this log.
+    enum WakeOutcome: String {
+        /// Resolved from the spend-time buffer — the good path.
+        case bufferHit = "buffer hit"
+        /// Took a fresh fix because the spend was recent.
+        case freshFix = "fresh fix"
+        /// Woke, but the spend was too old to answer honestly and the buffer
+        /// had nothing near it. Correct behaviour, not a failure.
+        case declined = "declined — no usable location"
+        /// Payload wasn't a location request. Should never happen in practice.
+        case badPayload = "unrecognised payload"
+    }
+
+    static func recordWake(_ outcome: WakeOutcome) {
+        let d = defaults
+        d.set(d.integer(forKey: wakeCountKey) + 1, forKey: wakeCountKey)
+        d.set(Date(), forKey: lastWakeAtKey)
+        d.set(outcome.rawValue, forKey: lastWakeOutcomeKey)
+    }
+
+    static var wakeCount: Int { defaults.integer(forKey: wakeCountKey) }
+    static var lastWakeAt: Date? { defaults.object(forKey: lastWakeAtKey) as? Date }
+    static var lastWakeOutcome: String? { defaults.string(forKey: lastWakeOutcomeKey) }
+
     // MARK: - Migration
 
     /// Move a pre-App-Group buffer into the shared suite, once.
