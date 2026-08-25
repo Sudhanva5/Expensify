@@ -16,6 +16,7 @@ import type { ParsedTransaction } from '../parsers/hdfc/index.js';
 import { checkBudgetForCategory } from './budgetAlerts.js';
 import { sendParserMissedAlert } from '../services/apns.js';
 import { initialLocationStatus } from './locationLifecycle.js';
+import { bindOrphanReceiptsNear } from './bindOrphanReceipts.js';
 
 export type ProcessOutcome =
   | {
@@ -261,6 +262,25 @@ export async function processGmailMessage(
       gmailMessageId: msg.id,
       transactionId: upsert.id,
     };
+  }
+
+  // Sweep back for receipts that beat this bank alert. Merchants often
+  // email faster than HDFC — the redBus ticket landed 21s before the debit
+  // alert, so binding only at receipt-ingest time left it permanently
+  // orphaned. Awaited rather than fire-and-forget so the receipt is already
+  // attached by the time iOS refreshes, but wrapped so a failure here can
+  // never lose the transaction we just wrote.
+  if (parseResult.data.direction === 'out') {
+    try {
+      const sweep = await bindOrphanReceiptsNear(parseResult.data.occurredAt);
+      for (const b of sweep.bound) {
+        console.log(
+          `[receipt-bind] late-bound ${b.source} receipt ${b.gmailMessageId} → tx ${b.transactionId} (${b.reason})`,
+        );
+      }
+    } catch (err) {
+      console.error('[receipt-bind] orphan sweep failed:', err);
+    }
   }
 
   // Budget threshold check — fires an APNs push if MTD spend on this

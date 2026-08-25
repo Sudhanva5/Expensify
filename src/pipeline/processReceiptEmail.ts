@@ -15,7 +15,12 @@ import type { ExtractedMessage } from '../gmail/messageBody.js';
 import { prisma } from '../db/client.js';
 import { Prisma } from '@prisma/client';
 import { pickExtractor, isReceiptSender } from '../receipts/extractors.js';
-import { classifyVpa } from '../categorize/vpaShape.js';
+import {
+  MATCH_WINDOW_MS,
+  RELAXED_WINDOW_MS,
+  receiptAlignsWithTransaction,
+  type TransactionSide,
+} from '../receipts/binding.js';
 
 export type ReceiptOutcome =
   | { kind: 'skipped_non_receipt'; gmailMessageId: string }
@@ -31,16 +36,6 @@ export type ReceiptOutcome =
       boundTransactionId: string | null;
       matchReason: 'amount_and_window' | 'amount_only' | 'no_match' | 'source_merchant_mismatch';
     };
-
-/** Time window between the receipt arrival and the HDFC card-debit
- *  alert. Was ±30 min originally but real-world delays push past that:
- *  Swiggy delivery emails arrive 25-40 min AFTER the bank debit, RedBus
- *  sends the ticket and the tax-invoice ~10 min apart. ±90 min absorbs
- *  the long tail without pulling in unrelated same-amount debits — the
- *  binder still requires source ↔ merchant alignment AND the non-P2P
- *  guard regardless of how wide this window is.
- */
-const MATCH_WINDOW_MS = 90 * 60 * 1000;
 
 export async function processReceiptEmail(msg: ExtractedMessage): Promise<ReceiptOutcome> {
   if (!isReceiptSender(msg.fromAddress)) {
@@ -132,59 +127,49 @@ interface MatchResult {
 }
 
 /**
- * Per-source merchant keywords that a receipt's matched transaction
- * MUST contain in its `merchantNormalized` or `merchantRaw`. Without
- * this, a Swiggy receipt for ₹200 could bind to ANY ₹200 outbound
- * transaction in the window — including offline kirana payments via
- * Paytm-QR that happen to have the same amount.
- */
-const SOURCE_MERCHANT_KEYWORDS: Record<string, RegExp> = {
-  swiggy: /swiggy|bundl/i,
-  instamart: /swiggy|instamart|bundl/i,
-  zomato: /zomato/i,
-  amazon: /amazon|amzn/i,
-  bookmyshow: /bookmyshow|bms/i,
-  uber: /uber/i,
-  cab: /uber|ola|rapido/i,
-  travel: /makemytrip|goibibo|cleartrip|easemytrip|irctc|indigo|akasa|vistara/i,
-  redbus: /redbus|redb|royal\s*rich|volvo|sleeper|seater|ksrtc|ktdc|tsrtc|apsrtc/i,
-  airbnb: /airbnb/i,
-  shopping: /amazon|flipkart|myntra|jiomart/i,
-  grocery: /bigbasket|blinkit|zepto|dmart|reliance/i,
-};
-
-/** Returns true when the transaction's merchant text aligns with the source. */
-function merchantMatchesSource(merchant: string, source: string): boolean {
-  const re = SOURCE_MERCHANT_KEYWORDS[source];
-  if (!re) return false; // unknown source → don't bind (safer)
-  return re.test(merchant);
-}
-
-/**
  * Look up an HDFC transaction that this receipt likely corresponds to.
  *
- * Match requires:
- *   1. Exact amount match
- *   2. occurredAt within ±30 minutes of receipt arrival (or amount-only
- *      fallback when window match yields nothing)
- *   3. **Merchant ↔ source alignment** — the transaction's merchantRaw
- *      or merchantNormalized must mention a keyword for the receipt's
- *      source. A Swiggy receipt can only bind to a transaction whose
- *      merchant text mentions Swiggy/Bundl. Without this guard, random
- *      same-amount coincidences bind incorrectly (the "Thimmegowda
- *      got a Swiggy email tagged to it" class of bug).
+ * The three guards (amount, source↔merchant alignment, non-P2P) live in
+ * receipts/binding.ts so the reverse direction — bindOrphanReceiptsNear(),
+ * which sweeps for receipts that arrived BEFORE their bank alert — applies
+ * exactly the same rules. Prisma narrows on the cheap indexed columns here;
+ * the predicate makes the actual decision.
+ *
+ * Exported so the reverse sweep and the backfill script share this code
+ * path rather than reimplementing the "exactly one aligned candidate" rule.
  */
-async function tryBindToTransaction(opts: {
+export async function tryBindToTransaction(opts: {
   amountInrMinor: bigint | null;
   receivedAt: Date;
   source: string;
+  /** Set false to require a match inside MATCH_WINDOW_MS and skip the
+   *  wider fallback. The orphan sweep and backfill pass false: they
+   *  already select receipts sitting next to a transaction in time, so a
+   *  relaxed hit there would be a coincidence rather than evidence. */
+  allowRelaxed?: boolean;
 }): Promise<MatchResult> {
   if (opts.amountInrMinor === null) {
     return { transactionId: null, reason: 'no_match' };
   }
 
+  const receipt = {
+    amountInrMinor: opts.amountInrMinor,
+    receivedAt: opts.receivedAt,
+    source: opts.source,
+  };
+
   const since = new Date(opts.receivedAt.getTime() - MATCH_WINDOW_MS);
   const until = new Date(opts.receivedAt.getTime() + MATCH_WINDOW_MS);
+
+  const CANDIDATE_FIELDS = {
+    id: true,
+    amountInrMinor: true,
+    direction: true,
+    occurredAt: true,
+    merchantRaw: true,
+    merchantNormalized: true,
+    vpa: true,
+  } as const;
 
   const candidates = await prisma.transaction.findMany({
     where: {
@@ -192,24 +177,12 @@ async function tryBindToTransaction(opts: {
       direction: 'out',
       occurredAt: { gte: since, lte: until },
     },
-    select: { id: true, occurredAt: true, merchantRaw: true, merchantNormalized: true, vpa: true },
+    select: CANDIDATE_FIELDS,
     orderBy: { occurredAt: 'asc' },
   });
 
-  // Strict alignment: require both
-  //   (a) the candidate's merchant text mentions a keyword for the
-  //       receipt's source (Swiggy receipts only bind to Swiggy
-  //       transactions), AND
-  //   (b) the candidate isn't an obvious P2P UPI transfer. UPI
-  //       payments to a personal-shape VPA (firstname@oksbi,
-  //       9876543210@ybl) are person-to-person and NEVER have a
-  //       merchant email receipt. The user explicitly asked: "no
-  //       emails for offline purchases, only for online merchants."
-  //       P2P UPI is the canonical offline case.
-  const aligned = candidates.filter(
-    (c) =>
-      merchantMatchesSource(`${c.merchantRaw} ${c.merchantNormalized}`, opts.source) &&
-      !isPersonalUpiTransfer(c.vpa),
+  const aligned = candidates.filter((c) =>
+    receiptAlignsWithTransaction(receipt, c as TransactionSide),
   );
 
   if (aligned.length === 1) {
@@ -220,34 +193,33 @@ async function tryBindToTransaction(opts: {
     // reject the bind explicitly so iOS doesn't show a misleading link.
     return { transactionId: null, reason: 'source_merchant_mismatch' };
   }
-  if (candidates.length === 0) {
-    // Relaxed match — same amount, any time. Same alignment + P2P guard.
+  if (candidates.length === 0 && opts.allowRelaxed !== false) {
+    // Relaxed match — same amount, wider window. This used to be "any
+    // time", which paired receipts with same-amount transactions up to 163
+    // days apart; RELAXED_WINDOW_MS caps it at 24h so a delayed bank alert
+    // or a next-morning delivery email still binds, but two unrelated ₹238
+    // Swiggy orders in different months cannot.
     const sameAmount = await prisma.transaction.findMany({
       where: {
         amountInrMinor: opts.amountInrMinor,
         direction: 'out',
+        occurredAt: {
+          gte: new Date(opts.receivedAt.getTime() - RELAXED_WINDOW_MS),
+          lte: new Date(opts.receivedAt.getTime() + RELAXED_WINDOW_MS),
+        },
       },
-      select: { id: true, merchantRaw: true, merchantNormalized: true, vpa: true },
+      select: CANDIDATE_FIELDS,
     });
-    const sameAmountAligned = sameAmount.filter(
-      (c) =>
-        merchantMatchesSource(`${c.merchantRaw} ${c.merchantNormalized}`, opts.source) &&
-        !isPersonalUpiTransfer(c.vpa),
+    const sameAmountAligned = sameAmount.filter((c) =>
+      receiptAlignsWithTransaction(receipt, c as TransactionSide, {
+        windowMs: RELAXED_WINDOW_MS,
+      }),
     );
     if (sameAmountAligned.length === 1) {
       return { transactionId: sameAmountAligned[0]!.id, reason: 'amount_only' };
     }
   }
   return { transactionId: null, reason: 'no_match' };
-}
-
-/// True when a VPA looks like a personal UPI handle — name@oksbi,
-/// 9876543210@ybl, etc. P2P transfers never have a merchant receipt.
-/// Centralized here so the guard reads cleanly inside the candidate
-/// filter.
-function isPersonalUpiTransfer(vpa: string | null): boolean {
-  if (!vpa) return false;
-  return classifyVpa(vpa) === 'personal';
 }
 
 /**
