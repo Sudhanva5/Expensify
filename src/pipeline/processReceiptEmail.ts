@@ -15,6 +15,7 @@ import type { ExtractedMessage } from '../gmail/messageBody.js';
 import { prisma } from '../db/client.js';
 import { Prisma } from '@prisma/client';
 import { pickExtractor, isReceiptSender } from '../receipts/extractors.js';
+import { detectMarketingReceipt } from '../receipts/marketing.js';
 import {
   MATCH_WINDOW_MS,
   RELAXED_WINDOW_MS,
@@ -24,6 +25,13 @@ import {
 
 export type ReceiptOutcome =
   | { kind: 'skipped_non_receipt'; gmailMessageId: string }
+  | {
+      kind: 'skipped_marketing';
+      gmailMessageId: string;
+      subject: string;
+      reason: 'non_transactional_sender' | 'marketing_subject';
+      matched: string;
+    }
   | { kind: 'duplicate'; gmailMessageId: string; receiptId: string }
   | {
       kind: 'processed';
@@ -85,6 +93,26 @@ export function extractReceiptFields(msg: { fromAddress: string | null; body: st
 export async function processReceiptEmail(msg: ExtractedMessage): Promise<ReceiptOutcome> {
   if (!isReceiptSender(msg.fromAddress)) {
     return { kind: 'skipped_non_receipt', gmailMessageId: msg.id };
+  }
+
+  // isReceiptSender only knows the DOMAIN, and merchants send far more
+  // marketing than receipts from the same one. Drop the ads before they
+  // become rows: the universal extractor will pull a number out of
+  // anything, and "Here's how you can get a FREE bus ticket" was stored
+  // holding ₹850 — a figure invented by an ad, sitting one coincidence away
+  // from binding to a real ₹850 debit.
+  const marketing = detectMarketingReceipt(msg.fromAddress, msg.subject);
+  if (marketing.isMarketing) {
+    console.log(
+      `[receipt] skipping marketing mail ${msg.id} (${marketing.reason}: "${marketing.matched}") — "${msg.subject.slice(0, 70)}"`,
+    );
+    return {
+      kind: 'skipped_marketing',
+      gmailMessageId: msg.id,
+      subject: msg.subject,
+      reason: marketing.reason!,
+      matched: marketing.matched!,
+    };
   }
 
   // Idempotency.
