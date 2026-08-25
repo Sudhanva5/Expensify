@@ -61,7 +61,18 @@ export const SOURCE_MERCHANT_KEYWORDS: Record<string, RegExp> = {
   uber: /uber/i,
   cab: /uber|ola|rapido/i,
   travel: /makemytrip|goibibo|cleartrip|easemytrip|irctc|indigo|akasa|vistara/i,
-  redbus: /redbus|redb|royal\s*rich|volvo|sleeper|seater|ksrtc|ktdc|tsrtc|apsrtc/i,
+  // `makemytrip|mmt` is here on purpose and the asymmetry with `travel`
+  // below is deliberate. MakeMyTrip owns redBus and settles some bookings
+  // through its own acquirer, so a real bus ticket shows up against a payee
+  // of "CAS*MAKEMYTRIP INDIA P". Ticket TV8Q64078508 could not bind for
+  // that reason, and TV8K93604197 only bound because the merchant had been
+  // hand-renamed "Redbus" — the guard was leaning on a user edit.
+  //
+  // The reverse is NOT allowed: `travel` (an MMT hotel/flight receipt) must
+  // not match a REDBUS payee, or two unrelated travel bookings of the same
+  // amount would pair up.
+  redbus:
+    /redbus|redb|makemytrip|mmt|royal\s*rich|volvo|sleeper|seater|ksrtc|ktdc|tsrtc|apsrtc/i,
   airbnb: /airbnb/i,
   shopping: /amazon|flipkart|myntra|jiomart/i,
   grocery: /bigbasket|blinkit|zepto|dmart|reliance/i,

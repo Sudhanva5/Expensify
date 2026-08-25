@@ -157,6 +157,25 @@ describe('merchantMatchesSource', () => {
     expect(merchantMatchesSource('PHP*REDBUS redBus', 'redbus')).toBe(true);
   });
 
+  // MakeMyTrip owns redBus and settles some bookings through its own
+  // acquirer, so a genuine redBus ticket can arrive against a payee of
+  // "CAS*MAKEMYTRIP INDIA P" (CAS* = Cashfree routing). Ticket
+  // TV8Q64078508 was blocked by exactly this; TV8K93604197 only got
+  // through because the merchant had been manually renamed "Redbus",
+  // i.e. the guard was being rescued by a user edit.
+  it('matches the MakeMyTrip acquirer for a redBus receipt', () => {
+    expect(merchantMatchesSource('CAS*MAKEMYTRIP INDIA P', 'redbus')).toBe(true);
+    expect(merchantMatchesSource('MMT*BUS BOOKING', 'redbus')).toBe(true);
+  });
+
+  // Deliberately asymmetric. redBus settles through MMT, so a redBus
+  // receipt may bind to an MMT-acquirer charge — but an MMT hotel or
+  // flight receipt has no business binding to a REDBUS payee, and
+  // widening that direction too would pair unrelated travel bookings.
+  it('does NOT let a MakeMyTrip receipt bind to a redBus payee', () => {
+    expect(merchantMatchesSource('PHP*REDBUS', 'travel')).toBe(false);
+  });
+
   it('matches a bus operator name for a redBus receipt', () => {
     expect(merchantMatchesSource('KSRTC ONLINE', 'redbus')).toBe(true);
   });

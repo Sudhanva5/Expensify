@@ -37,6 +37,51 @@ export type ReceiptOutcome =
       matchReason: 'amount_and_window' | 'amount_only' | 'no_match' | 'source_merchant_mismatch';
     };
 
+/**
+ * Route an email to its extractor and run it. Pulled out of
+ * processReceiptEmail so scripts/reextract-receipts.ts can replay the exact
+ * same routing + parsing over an already-stored receipt.
+ *
+ * That script exists because extraction is PERSISTED at ingest and the
+ * email body is not kept, so a parser fix is not retroactive and there was
+ * no way to replay it. Three redBus tickets sat unbound for a month holding
+ * the gross ticket price, from before `extractRedbus` learned to read
+ * "Ticket Price" across a line break and subtract the coupon — the current
+ * parser gets all three right. Sharing this function is what stops the
+ * replay path from drifting away from the live one.
+ */
+export function extractReceiptFields(msg: { fromAddress: string | null; body: string }): {
+  extracted: ReturnType<ReturnType<typeof pickExtractor>['extract']>;
+  parseError: string | null;
+  /** Post-override source: some parsers (Instamart inside the swiggy.in
+   *  chain) reclassify based on body content. */
+  finalSource: string;
+} {
+  const { source, extract } = pickExtractor(msg.fromAddress ?? '');
+  const plainText = stripHtmlToText(msg.body);
+  try {
+    const extracted = extract(plainText);
+    return {
+      extracted,
+      parseError: null,
+      finalSource: extracted.sourceOverride ?? source,
+    };
+  } catch (err) {
+    return {
+      extracted: {
+        amountInrMinor: null,
+        orderId: null,
+        items: null,
+        fees: null,
+        meta: null,
+        parserVersion: `${source}.failed`,
+      },
+      parseError: (err as Error).message,
+      finalSource: source,
+    };
+  }
+}
+
 export async function processReceiptEmail(msg: ExtractedMessage): Promise<ReceiptOutcome> {
   if (!isReceiptSender(msg.fromAddress)) {
     return { kind: 'skipped_non_receipt', gmailMessageId: msg.id };
@@ -51,23 +96,7 @@ export async function processReceiptEmail(msg: ExtractedMessage): Promise<Receip
     return { kind: 'duplicate', gmailMessageId: msg.id, receiptId: existing.id };
   }
 
-  const { source, extract } = pickExtractor(msg.fromAddress ?? '');
-  const plainText = stripHtmlToText(msg.body);
-  let extracted;
-  let parseError: string | null = null;
-  try {
-    extracted = extract(plainText);
-  } catch (err) {
-    parseError = (err as Error).message;
-    extracted = {
-      amountInrMinor: null,
-      orderId: null,
-      items: null,
-      fees: null,
-      meta: null,
-      parserVersion: `${source}.failed`,
-    };
-  }
+  const { extracted, parseError, finalSource } = extractReceiptFields(msg);
 
   // Try to bind to a recent HDFC transaction. Pass the receipt's source
   // so we can require merchant↔source alignment (a Swiggy receipt
@@ -77,12 +106,8 @@ export async function processReceiptEmail(msg: ExtractedMessage): Promise<Receip
   const matchResult = await tryBindToTransaction({
     amountInrMinor: extracted.amountInrMinor,
     receivedAt: msg.receivedAt,
-    source: extracted.sourceOverride ?? source,
+    source: finalSource,
   });
-
-  // Some parsers (e.g. Instamart inside the swiggy.in chain) reclassify
-  // the source based on body content. Honour the override when set.
-  const finalSource = extracted.sourceOverride ?? source;
 
   const created = await prisma.emailReceipt.create({
     data: {
