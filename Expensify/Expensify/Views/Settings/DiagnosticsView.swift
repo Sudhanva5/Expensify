@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import CoreLocation
 
 /// Single home for every "is the system healthy?" affordance:
 ///
@@ -42,6 +43,7 @@ struct DiagnosticsView: View {
             List {
                 connectionSection
                 notificationsSection
+                locationCaptureSection
                 contactsSection
                 mcpSection
             }
@@ -192,6 +194,111 @@ struct DiagnosticsView: View {
             testPushError = error.localizedDescription
         }
         testPushState = .done
+    }
+
+    // MARK: - Location capture
+
+    /// Why this section exists: when Background App Refresh is off — which
+    /// Low Power Mode forces — iOS silently drops every `content-available`
+    /// push. Nothing errors, no log appears, the app just never wakes and
+    /// every outflow strands at `awaiting` until the 24h sweep calls it
+    /// `missed`. That failure was invisible from inside the app for months.
+    /// These three rows make each precondition a visible fact.
+    private var locationCaptureSection: some View {
+        Section {
+            preconditionRow(
+                title: "location access",
+                ok: LocationService.shared.authorizationStatus == .authorizedAlways,
+                detail: locationAuthDetail,
+                fixHint: "settings → expensify → location → always"
+            )
+            preconditionRow(
+                title: "location pushes",
+                ok: PushService.shared.hasLocationPushToken,
+                detail: PushService.shared.hasLocationPushToken
+                    ? "registered — wakes even in low power mode"
+                    : "no token yet",
+                fixHint: "needs the location-push entitlement; retries on next launch"
+            )
+            preconditionRow(
+                title: "background app refresh",
+                ok: backgroundRefreshEnabled,
+                detail: backgroundRefreshDetail,
+                fixHint: "turn off low power mode, then settings → general → background app refresh"
+            )
+            preconditionRow(
+                title: "shared location buffer",
+                ok: SharedLocationStore.isSharedContainerAvailable,
+                detail: SharedLocationStore.isSharedContainerAvailable
+                    ? "\(LocationService.shared.locationHistory.count) entries"
+                    : "app group unavailable",
+                fixHint: "the push extension can't read spend-time history without it"
+            )
+        } header: {
+            Text("location capture")
+                .font(AppFont.sectionLabel)
+                .foregroundStyle(AppColor.textTertiary)
+        } footer: {
+            Text("a transaction gets its location from one of three wakes: a location push (survives low power mode), a silent push (needs background app refresh), or movement of ~500m. the first two rows are the ones that matter most.")
+                .font(AppFont.caption)
+                .foregroundStyle(AppColor.textTertiary)
+        }
+    }
+
+    private func preconditionRow(
+        title: String,
+        ok: Bool,
+        detail: String,
+        fixHint: String
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(ok ? AppColor.inflow : .orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 14))
+                    .foregroundStyle(AppColor.textPrimary)
+                Text(detail)
+                    .font(AppFont.caption)
+                    .foregroundStyle(AppColor.textSecondary)
+                // Only worth the vertical space when something is actually
+                // wrong — a healthy row doesn't need instructions.
+                if !ok {
+                    Text(fixHint)
+                        .font(AppFont.caption)
+                        .foregroundStyle(AppColor.textTertiary)
+                }
+            }
+            Spacer()
+        }
+    }
+
+    private var locationAuthDetail: String {
+        switch LocationService.shared.authorizationStatus {
+        case .authorizedAlways: return "always"
+        // "While Using" is not enough: a push-woken app is backgrounded by
+        // definition, so CoreLocation hands back nothing.
+        case .authorizedWhenInUse: return "while using only"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        case .notDetermined: return "not asked yet"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private var backgroundRefreshEnabled: Bool {
+        UIApplication.shared.backgroundRefreshStatus == .available
+    }
+
+    private var backgroundRefreshDetail: String {
+        switch UIApplication.shared.backgroundRefreshStatus {
+        case .available: return "on"
+        // `.restricted` is what Low Power Mode and Screen Time both look
+        // like from here; `.denied` is the per-app toggle being off.
+        case .restricted: return "restricted — low power mode or screen time"
+        case .denied: return "off — silent pushes will not be delivered"
+        @unknown default: return "unknown"
+        }
     }
 
     // MARK: - Contacts

@@ -508,9 +508,23 @@ actor APIClient {
     // MARK: - Device + location
 
     /// Tell the backend about this device's APNs token so it can send silent pushes.
-    func registerDevice(apnsToken: String) async throws {
-        struct Body: Encodable { let apnsToken: String }
-        try await postNoContent(path: "/devices/register", body: Body(apnsToken: apnsToken))
+    /// Register this device's push credentials.
+    ///
+    /// `locationPushToken` is the token from
+    /// `startMonitoringLocationPushes` — a separate credential from the APNs
+    /// token, and the only one that can be used for a location push. It's
+    /// optional because it may not exist yet (or at all, if the entitlement
+    /// is missing); the backend leaves a previously-stored token alone when
+    /// the field is absent rather than wiping it.
+    func registerDevice(apnsToken: String, locationPushToken: String? = nil) async throws {
+        struct Body: Encodable {
+            let apnsToken: String
+            let locationPushToken: String?
+        }
+        try await postNoContent(
+            path: "/devices/register",
+            body: Body(apnsToken: apnsToken, locationPushToken: locationPushToken)
+        )
     }
 
     /// Fire a synthetic visible push to every device the backend knows

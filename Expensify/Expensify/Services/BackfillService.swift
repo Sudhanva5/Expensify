@@ -1,11 +1,28 @@
 import Foundation
 import CoreLocation
 
+/// What woke the backfill. Only affects debouncing and log lines — the
+/// resolution rules are identical, because "where was the user at
+/// occurredAt" doesn't depend on why we're asking.
+enum BackfillTrigger: String {
+    /// The user opened the app. Always runs — it's user-initiated, and the
+    /// user is entitled to see their rows resolve while they watch.
+    case foreground
+    /// A Significant Location Change woke us in the background. These fire
+    /// on ~500m of movement and, crucially, are gated on *location*
+    /// authorization rather than Background App Refresh — so this is the
+    /// path that still works when Low Power Mode has killed silent pushes.
+    case locationWake
+}
+
 /// Catches up `awaiting_location` transactions when the silent push failed
 /// to wake the app (Low Power Mode, push throttling, etc.).
 ///
-/// Called from `AppDelegate.applicationDidBecomeActive`. Strategy now
-/// favours the spend-time buffer over a fresh fetchOnce:
+/// Called from `AppDelegate.applicationDidBecomeActive` AND from the
+/// Significant Location Change delegate — an SLC wake is the only capture
+/// path left when Low Power Mode / Background App Refresh off has stopped
+/// iOS delivering silent pushes at all. Strategy favours the spend-time
+/// buffer over a fresh fetchOnce:
 ///
 ///   1. Pull the awaiting list (each row carries its own occurredAt).
 ///   2. For each row, look up `LocationService.closestEntry(to: occurredAt)`
@@ -25,11 +42,30 @@ actor BackfillService {
     /// Older rows depend entirely on the spend-time buffer.
     private static let recentWindow: TimeInterval = 5 * 60
 
-    private var inFlight = false
+    /// Minimum gap between two location-wake backfills. SLC can fire
+    /// repeatedly while crossing cell towers (a train, a highway), and each
+    /// run costs a round trip to /transactions/awaiting. Foreground runs are
+    /// deliberately exempt.
+    private static let locationWakeDebounce: TimeInterval = 2 * 60
 
-    /// Foreground catchup. Fired from `applicationDidBecomeActive`.
-    func backfillFromForeground() async {
+    private var inFlight = false
+    private var lastLocationWakeRunAt: Date?
+
+    /// Catch up every row still awaiting a location.
+    ///
+    /// Called from `applicationDidBecomeActive` and from the SLC delegate.
+    func backfillAwaiting(trigger: BackfillTrigger) async {
         if inFlight { return }
+
+        if trigger == .locationWake, let last = lastLocationWakeRunAt,
+           Date().timeIntervalSince(last) < Self.locationWakeDebounce {
+            #if DEBUG
+            print("[Backfill] locationWake skipped — ran \(Int(Date().timeIntervalSince(last)))s ago")
+            #endif
+            return
+        }
+        if trigger == .locationWake { lastLocationWakeRunAt = Date() }
+
         inFlight = true
         defer { inFlight = false }
 
@@ -38,13 +74,13 @@ actor BackfillService {
             awaitingList = try await APIClient.shared.fetchAwaitingLocationTransactions()
         } catch {
             #if DEBUG
-            print("[Backfill] fetch awaiting failed: \(error)")
+            print("[Backfill] \(trigger.rawValue): fetch awaiting failed: \(error)")
             #endif
             return
         }
         if awaitingList.isEmpty {
             #if DEBUG
-            print("[Backfill] nothing awaiting")
+            print("[Backfill] \(trigger.rawValue): nothing awaiting")
             #endif
             return
         }
@@ -69,7 +105,7 @@ actor BackfillService {
         }
 
         #if DEBUG
-        print("[Backfill] \(awaitingList.count) awaiting, \(bufferHits) resolved from buffer, \(stillNeedingNow.count) recent rows need a fresh fix")
+        print("[Backfill] \(trigger.rawValue): \(awaitingList.count) awaiting, \(bufferHits) resolved from buffer, \(stillNeedingNow.count) recent rows need a fresh fix")
         #endif
 
         // Pass 2: one fresh fetchOnce for any recent rows the buffer

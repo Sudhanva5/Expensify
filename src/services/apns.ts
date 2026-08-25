@@ -108,8 +108,118 @@ export async function sendLocationRequestPush(args: LocationRequestPushArgs): Pr
   }
 }
 
+/// How long a location-query push stays valid. Far longer than the silent
+/// push's 90s, and deliberately so: the location-push extension resolves the
+/// payload against the on-device spend-time buffer keyed on `occurredAt`, so
+/// a push that lands 10 minutes late still reports where the user was when
+/// they paid. The silent push can't make that trade — it needs the app awake,
+/// and a late wake would report where the phone is now.
+const LOCATION_QUERY_EXPIRY_SECONDS = 30 * 60;
+
+interface LocationQueryNotificationArgs {
+  bundleId: string;
+  transactionId: string;
+  occurredAt: Date;
+}
+
+/// Build the `apns-push-type: location` notification.
+///
+/// Split out as a pure function because every field here is a silent
+/// failure mode: the topic needs the `.location-query` suffix (APNs rejects
+/// the bare bundle id), the push type must be `location` (a `background`
+/// push is exactly what Low Power Mode drops), the priority must be 10
+/// (background pushes are capped at 5, and a power-deferred location wake
+/// arrives after the user has left), and `content-available` must NOT be
+/// set or the whole thing degrades back into a silent push.
+export function buildLocationQueryNotification(
+  args: LocationQueryNotificationArgs,
+): apn.Notification {
+  const note = new apn.Notification();
+  note.topic = `${args.bundleId}.location-query`;
+  note.pushType = 'location';
+  note.priority = 10;
+  note.expiry = Math.floor(Date.now() / 1000) + LOCATION_QUERY_EXPIRY_SECONDS;
+  note.payload = {
+    kind: 'request_location',
+    transactionId: args.transactionId,
+    occurredAt: args.occurredAt.toISOString(),
+  };
+  return note;
+}
+
+interface LocationQueryPushArgs {
+  /// The token from `startMonitoringLocationPushes` — NOT the APNs token.
+  /// Sending a location push to the regular token fails.
+  locationPushToken: string;
+  transactionId: string;
+  occurredAt: Date;
+}
+
+/// Send a location-query push, waking the location-push extension even when
+/// the app is terminated and Background App Refresh is off. Returns true on
+/// success; errors are logged, never thrown.
+export async function sendLocationQueryPush(args: LocationQueryPushArgs): Promise<boolean> {
+  const p = getProvider();
+  if (!p) return false;
+
+  const bundleId = process.env['APNS_BUNDLE_ID'];
+  if (!bundleId) {
+    console.warn('[APNs] APNS_BUNDLE_ID not set; skipping location push');
+    return false;
+  }
+
+  const note = buildLocationQueryNotification({
+    bundleId,
+    transactionId: args.transactionId,
+    occurredAt: args.occurredAt,
+  });
+
+  try {
+    const result = await p.send(note, args.locationPushToken);
+    if (result.failed.length > 0) {
+      console.error('[APNs] location push failed:', JSON.stringify(result.failed));
+      for (const failed of result.failed) {
+        const reason = failed.response?.reason;
+        if (reason === 'BadDeviceToken' || reason === 'Unregistered') {
+          // Clear the COLUMN, not the row. The row's apnsToken is a
+          // separate, independently-valid credential — deleting the row
+          // would take the working silent-push path down with it.
+          await prisma.deviceToken
+            .updateMany({
+              where: { locationPushToken: args.locationPushToken },
+              data: { locationPushToken: null },
+            })
+            .catch((err) =>
+              console.error('[APNs] failed to clear dead location token:', err),
+            );
+          console.log(
+            '[APNs] cleared dead location token:',
+            args.locationPushToken.slice(0, 16),
+          );
+        }
+      }
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('[APNs] location push send error:', err);
+    return false;
+  }
+}
+
 /// Convenience wrapper: load every registered device for the (single, V1) user
 /// and fan out the push. Logs but never throws.
+///
+/// BOTH wake paths fire, because each covers the other's blind spot:
+///
+///   • the location push survives Low Power Mode / Background App Refresh
+///     off and a terminated app, but it needs the entitlement, and Apple
+///     documents nothing about how aggressively iOS throttles it;
+///   • the silent push needs Background App Refresh on, but when the app is
+///     alive it wakes in seconds and can read the full location history.
+///
+/// Whichever lands first wins: `POST /transactions/:id/location` ignores
+/// uploads for rows already `fulfilled`, so the loser costs nothing.
 export async function requestLocationFromAllDevices(
   transactionId: string,
   occurredAt: Date,
@@ -120,11 +230,26 @@ export async function requestLocationFromAllDevices(
     return;
   }
   for (const d of devices) {
-    await sendLocationRequestPush({
+    if (d.locationPushToken) {
+      const ok = await sendLocationQueryPush({
+        locationPushToken: d.locationPushToken,
+        transactionId,
+        occurredAt,
+      });
+      console.log(`[APNs] location push for ${transactionId}: ${ok ? 'sent' : 'failed'}`);
+    } else {
+      console.warn(
+        `[APNs] device ${d.apnsToken.slice(0, 12)} has no location-push token — ` +
+          'silent push only, which Low Power Mode will drop',
+      );
+    }
+
+    const silentOk = await sendLocationRequestPush({
       apnsToken: d.apnsToken,
       transactionId,
       occurredAt,
     });
+    console.log(`[APNs] silent push for ${transactionId}: ${silentOk ? 'sent' : 'failed'}`);
   }
 }
 

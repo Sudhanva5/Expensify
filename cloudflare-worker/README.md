@@ -34,7 +34,7 @@ Copy that URL.
 
 ## Wire it up on iOS
 
-Edit `Expensify/Expensify/Constants.swift`:
+Edit `Expensify/Shared/Constants.swift`:
 
 ```swift
 // Before

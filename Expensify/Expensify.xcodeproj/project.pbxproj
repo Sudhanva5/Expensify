@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		3AA84D4E6F9888D71E4678E4 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9A512158A16BE3CE376AB1E2 /* Foundation.framework */; };
+		A0E95544D67F4E37879D8E24 /* LocationPushExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DB378C90C64ADA254E20768D /* LocationPushExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		3DC04EF42FB1092900529714 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -21,12 +26,35 @@
 			remoteGlobalIDString = 3DC04EE52FB1092600529714;
 			remoteInfo = Expensify;
 		};
+		668492CD010E1E89E01825EF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 3DC04EDE2FB1092600529714 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A8DA389ED3BDEE29518441AC;
+			remoteInfo = LocationPushExtension;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		DE08D88068B85F053EE999C6 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A0E95544D67F4E37879D8E24 /* LocationPushExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		3DC04EE62FB1092600529714 /* Expensify.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Expensify.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3DC04EF32FB1092900529714 /* ExpensifyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ExpensifyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3DC04EFD2FB1092900529714 /* ExpensifyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ExpensifyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9A512158A16BE3CE376AB1E2 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		DB378C90C64ADA254E20768D /* LocationPushExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LocationPushExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -37,9 +65,25 @@
 			);
 			target = 3DC04EE52FB1092600529714 /* Expensify */;
 		};
+		F06A09F92FD2BFFAB825D22D /* Exceptions for "LocationPushExtension" folder in "LocationPushExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				LocationPushExtension.entitlements,
+			);
+			target = A8DA389ED3BDEE29518441AC /* LocationPushExtension */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		2B870719890B2F6399DC30A7 /* LocationPushExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F06A09F92FD2BFFAB825D22D /* Exceptions for "LocationPushExtension" folder in "LocationPushExtension" target */,
+			);
+			path = LocationPushExtension;
+			sourceTree = "<group>";
+		};
 		3DC04EE82FB1092600529714 /* Expensify */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -50,12 +94,23 @@
 		};
 		3DC04EF62FB1092900529714 /* ExpensifyTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = ExpensifyTests;
 			sourceTree = "<group>";
 		};
 		3DC04F002FB1092900529714 /* ExpensifyUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = ExpensifyUITests;
+			sourceTree = "<group>";
+		};
+		FF63D67666BEB91E589998C6 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -82,6 +137,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E26E3A2D6F955649E63092DE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3AA84D4E6F9888D71E4678E4 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -92,6 +155,9 @@
 				3DC04EF62FB1092900529714 /* ExpensifyTests */,
 				3DC04F002FB1092900529714 /* ExpensifyUITests */,
 				3DC04EE72FB1092600529714 /* Products */,
+				FF63D67666BEB91E589998C6 /* Shared */,
+				2B870719890B2F6399DC30A7 /* LocationPushExtension */,
+				78DBDA47E98CC5DF165ED17A /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -101,8 +167,25 @@
 				3DC04EE62FB1092600529714 /* Expensify.app */,
 				3DC04EF32FB1092900529714 /* ExpensifyTests.xctest */,
 				3DC04EFD2FB1092900529714 /* ExpensifyUITests.xctest */,
+				DB378C90C64ADA254E20768D /* LocationPushExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		698E56C2ADAD62369B407E12 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				9A512158A16BE3CE376AB1E2 /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		78DBDA47E98CC5DF165ED17A /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				698E56C2ADAD62369B407E12 /* iOS */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -115,17 +198,18 @@
 				3DC04EE22FB1092600529714 /* Sources */,
 				3DC04EE32FB1092600529714 /* Frameworks */,
 				3DC04EE42FB1092600529714 /* Resources */,
+				DE08D88068B85F053EE999C6 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				8AEF480D8BBCCB7A8ABABFAA /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				3DC04EE82FB1092600529714 /* Expensify */,
+				FF63D67666BEB91E589998C6 /* Shared */,
 			);
 			name = Expensify;
-			packageProductDependencies = (
-			);
 			productName = Expensify;
 			productReference = 3DC04EE62FB1092600529714 /* Expensify.app */;
 			productType = "com.apple.product-type.application";
@@ -147,8 +231,6 @@
 				3DC04EF62FB1092900529714 /* ExpensifyTests */,
 			);
 			name = ExpensifyTests;
-			packageProductDependencies = (
-			);
 			productName = ExpensifyTests;
 			productReference = 3DC04EF32FB1092900529714 /* ExpensifyTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -170,11 +252,30 @@
 				3DC04F002FB1092900529714 /* ExpensifyUITests */,
 			);
 			name = ExpensifyUITests;
-			packageProductDependencies = (
-			);
 			productName = ExpensifyUITests;
 			productReference = 3DC04EFD2FB1092900529714 /* ExpensifyUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		A8DA389ED3BDEE29518441AC /* LocationPushExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5AEC88A46C6F2123F7692DA3 /* Build configuration list for PBXNativeTarget "LocationPushExtension" */;
+			buildPhases = (
+				CAA63D549BA30766237D3DA6 /* Sources */,
+				E26E3A2D6F955649E63092DE /* Frameworks */,
+				ED5E3D947D5B8AEE79EDB4B5 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				2B870719890B2F6399DC30A7 /* LocationPushExtension */,
+				FF63D67666BEB91E589998C6 /* Shared */,
+			);
+			name = LocationPushExtension;
+			productName = LocationPushExtension;
+			productReference = DB378C90C64ADA254E20768D /* LocationPushExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -216,6 +317,7 @@
 				3DC04EE52FB1092600529714 /* Expensify */,
 				3DC04EF22FB1092900529714 /* ExpensifyTests */,
 				3DC04EFC2FB1092900529714 /* ExpensifyUITests */,
+				A8DA389ED3BDEE29518441AC /* LocationPushExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -236,6 +338,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		3DC04EFB2FB1092900529714 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ED5E3D947D5B8AEE79EDB4B5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -266,6 +375,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CAA63D549BA30766237D3DA6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -279,9 +395,37 @@
 			target = 3DC04EE52FB1092600529714 /* Expensify */;
 			targetProxy = 3DC04EFE2FB1092900529714 /* PBXContainerItemProxy */;
 		};
+		8AEF480D8BBCCB7A8ABABFAA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = LocationPushExtension;
+			target = A8DA389ED3BDEE29518441AC /* LocationPushExtension */;
+			targetProxy = 668492CD010E1E89E01825EF /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		0D2D88592ED7D87FF3EB6C20 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = LocationPushExtension/LocationPushExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 27KHWRZ25B;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LocationPushExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = NCPUDP.Expensifyy.LocationPushExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		3DC04F052FB1092900529714 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -561,6 +705,29 @@
 			};
 			name = Release;
 		};
+		561EE65DE8148D4BC3F6E852 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = LocationPushExtension/LocationPushExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 27KHWRZ25B;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LocationPushExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = NCPUDP.Expensifyy.LocationPushExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -596,6 +763,15 @@
 			buildConfigurations = (
 				3DC04F0E2FB1092900529714 /* Debug */,
 				3DC04F0F2FB1092900529714 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5AEC88A46C6F2123F7692DA3 /* Build configuration list for PBXNativeTarget "LocationPushExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				561EE65DE8148D4BC3F6E852 /* Release */,
+				0D2D88592ED7D87FF3EB6C20 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

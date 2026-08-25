@@ -261,6 +261,15 @@ model DeviceToken {
   id        String   @id @default(cuid())
   apnsToken String   @unique
   lastSeen  DateTime @default(now())
+
+  /// Token from `CLLocationManager.startMonitoringLocationPushes` — a
+  /// DIFFERENT token from `apnsToken`, and the only one APNs accepts for
+  /// `apns-push-type: location`. Nullable because it arrives on its own
+  /// clock (the entitlement may be missing, or the callback may fire after
+  /// the APNs registration that created this row), and because a dead
+  /// location token must be clearable without deleting the row and taking
+  /// the working silent-push token with it.
+  locationPushToken String? @unique
 }
 
 model FxRate {

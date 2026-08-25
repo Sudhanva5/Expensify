@@ -4,5 +4,18 @@
 <dict>
 	<key>aps-environment</key>
 	<string>development</string>
+	<!-- Lets startMonitoringLocationPushes mint a token. Without this the
+	     call returns an error and location capture falls back to silent
+	     pushes only, which Low Power Mode drops. Requires the Location Push
+	     Service Extension capability on the App ID. -->
+	<key>com.apple.developer.location.push</key>
+	<true/>
+	<!-- Shared container for the spend-time location buffer. The extension
+	     is a separate process; without this it would read an empty history
+	     and tag transactions with wherever the phone is when APNs delivers. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.NCPUDP.Expensifyy</string>
+	</array>
 </dict>
 </plist>

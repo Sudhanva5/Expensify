@@ -41,14 +41,61 @@ final class PushService: NSObject, UNUserNotificationCenterDelegate {
         UIApplication.shared.registerForRemoteNotifications()
     }
 
+    // MARK: - Token registration
+    //
+    // Two independent tokens describe this one device:
+    //
+    //   • the APNs token, for alerts and silent pushes;
+    //   • the location-push token from `startMonitoringLocationPushes`,
+    //     which is the ONLY token APNs accepts for `apns-push-type:
+    //     location` — the wake that still works in Low Power Mode.
+    //
+    // They arrive on different clocks and the backend keys its row on the
+    // APNs token, so both are cached locally and every registration sends
+    // whatever is known. Without the cache, a location token arriving first
+    // (or an APNs re-registration arriving second) would drop the other.
+
+    private static let apnsTokenKey = "expensify.apnsToken"
+    private static let locationPushTokenKey = "expensify.locationPushToken"
+
     /// Hand the APNs token to the backend so it knows where to deliver pushes.
     func handleDeviceToken(_ tokenData: Data) async {
         let token = tokenData.map { String(format: "%02x", $0) }.joined()
         #if DEBUG
         print("[PushService] APNs token: \(token)")
         #endif
+        UserDefaults.standard.set(token, forKey: Self.apnsTokenKey)
+        await registerKnownTokens()
+    }
+
+    /// Hand the location-push token to the backend. Called from
+    /// `LocationService.startLocationPushMonitoring`.
+    func handleLocationPushToken(_ token: String) async {
+        #if DEBUG
+        print("[PushService] location-push token: \(token.prefix(16))…")
+        #endif
+        UserDefaults.standard.set(token, forKey: Self.locationPushTokenKey)
+        await registerKnownTokens()
+    }
+
+    /// True when iOS has handed us a location-push token. Surfaced in
+    /// Diagnostics: without it, Low Power Mode silently kills location
+    /// capture, and that should be a visible fact rather than a mystery.
+    var hasLocationPushToken: Bool {
+        UserDefaults.standard.string(forKey: Self.locationPushTokenKey) != nil
+    }
+
+    private func registerKnownTokens() async {
+        // The backend row is keyed on the APNs token, so there's nothing to
+        // register against until that one exists. A location token cached
+        // now gets sent with the APNs registration that follows.
+        guard let apns = UserDefaults.standard.string(forKey: Self.apnsTokenKey) else { return }
+        let locationPush = UserDefaults.standard.string(forKey: Self.locationPushTokenKey)
         do {
-            try await APIClient.shared.registerDevice(apnsToken: token)
+            try await APIClient.shared.registerDevice(
+                apnsToken: apns,
+                locationPushToken: locationPush
+            )
         } catch {
             #if DEBUG
             print("[PushService] failed to register device with backend: \(error)")

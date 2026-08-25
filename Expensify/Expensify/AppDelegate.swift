@@ -15,6 +15,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // instant. Fire and forget.
         Task { await HTTPClient.shared.warmup(baseURL: Constants.baseURL) }
 
+        // Move any pre-App-Group spend-time buffer into the shared container
+        // before anything reads it. No-op after the first launch that runs
+        // it, and the app is the only migrator — the location-push extension
+        // must never race this.
+        SharedLocationStore.migrateFromStandardIfNeeded()
+
         // Ask for notification permission and register for APNs immediately
         // so silent pushes start arriving as soon as iOS is willing.
         Task { @MainActor in
@@ -27,6 +33,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             // Safe to call — iOS no-ops if permission isn't granted yet, and
             // the delegate re-calls this once Always is approved.
             LocationService.shared.startSignificantChangeMonitoring()
+            // Same deal for location pushes: needs authorization to exist
+            // before iOS mints a token, and the authorization delegate
+            // re-runs it after an upgrade. Calling here covers the launch
+            // where permission was already granted in a previous session.
+            LocationService.shared.startLocationPushMonitoring()
         }
         return true
     }
@@ -75,10 +86,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             // user frequently opens the app within a minute or two of paying,
             // and that fix is a legitimate sample for the transaction that
             // just landed — but only if it's in the buffer before
-            // backfillFromForeground() does its lookup. Debounced internally,
+            // backfillAwaiting() does its lookup. Debounced internally,
             // so a foreground/background flap costs nothing.
             await LocationService.shared.captureIntoBufferIfNeeded()
-            await BackfillService.shared.backfillFromForeground()
+            await BackfillService.shared.backfillAwaiting(trigger: .foreground)
         }
     }
 }

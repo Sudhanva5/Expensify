@@ -29,19 +29,9 @@ final class LocationService: NSObject, @unchecked Sendable {
     private var oneShotState: OneShotState?
 
     /// Rolling movement log built from every CLLocation that reaches us.
-    /// Kept for diagnostics (the Settings → activity feed could surface
-    /// it later) — no longer used to assign locations to transactions.
-    var locationHistory: [LocationTrace] {
-        guard let data = UserDefaults.standard.data(forKey: Self.historyKey),
-              let history = try? JSONDecoder().decode([LocationTrace].self, from: data) else {
-            return []
-        }
-        return history
-    }
-
-    private static let historyKey = "expensify.locationHistory"
-    private static let maxHistorySize = 500
-    private static let maxHistoryAge: TimeInterval = 14 * 24 * 60 * 60
+    /// Storage lives in `SharedLocationStore` (App Group) so the
+    /// location-push extension queries the same buffer this app fills.
+    var locationHistory: [LocationTrace] { SharedLocationStore.load() }
 
     /// Don't fire opportunistic fetchOnce more than once per this many
     /// seconds. Caps battery cost when SLC fires rapidly (crossing Wi-Fi
@@ -57,6 +47,12 @@ final class LocationService: NSObject, @unchecked Sendable {
     /// 800m-accurate cell-tower fix as the first update of a stream, then
     /// follows up 5 seconds later with a fresh 12m GPS fix.
     private static let staleReadingThreshold: TimeInterval = 30
+
+    /// Location-push monitoring is started from two places — launch and the
+    /// authorization-change delegate — because either can be the first
+    /// moment it's legal. Starting it twice is pointless and iOS answers the
+    /// duplicate with an error, so it's gated to once per process.
+    private var locationPushMonitoringStarted = false
 
     override init() {
         super.init()
@@ -113,6 +109,47 @@ final class LocationService: NSObject, @unchecked Sendable {
             return
         }
         manager.startMonitoringSignificantLocationChanges()
+    }
+
+    /// Subscribe to APNs **location pushes** and hand the resulting token to
+    /// the backend.
+    ///
+    /// This is the wake path that survives Low Power Mode. iOS refuses to
+    /// deliver `content-available` pushes when Background App Refresh is off
+    /// — which Low Power Mode forces — so the silent-push handler simply
+    /// never runs, and every outflow strands at `awaiting` until the 24h
+    /// sweep marks it `missed`. A location push is delivered to the
+    /// location-push *extension* instead, gated on location authorization,
+    /// and works with the app terminated.
+    ///
+    /// Two traps: the token this hands back is NOT the APNs token (a
+    /// location push sent to the regular token fails), and the call needs the
+    /// `com.apple.developer.location.push` entitlement — without it the
+    /// completion returns an error and we keep running on silent pushes
+    /// alone, which is the pre-existing behaviour rather than a regression.
+    func startLocationPushMonitoring() {
+        lock.lock()
+        let alreadyStarted = locationPushMonitoringStarted
+        locationPushMonitoringStarted = true
+        lock.unlock()
+        if alreadyStarted { return }
+
+        manager.startMonitoringLocationPushes { [weak self] tokenData, error in
+            if let error {
+                #if DEBUG
+                print("[LocationService] location-push monitoring failed: \(error)")
+                #endif
+                // Let a later authorization change retry — the usual cause is
+                // asking before authorization existed.
+                self?.lock.lock()
+                self?.locationPushMonitoringStarted = false
+                self?.lock.unlock()
+                return
+            }
+            guard let tokenData else { return }
+            let token = tokenData.map { String(format: "%02x", $0) }.joined()
+            Task { await PushService.shared.handleLocationPushToken(token) }
+        }
     }
 
     /// Accuracy-bounded one-shot fetch.
@@ -293,52 +330,32 @@ final class LocationService: NSObject, @unchecked Sendable {
     // buffer to sub-30m for ~95% of entries.
     //
     // `closestEntry(to:withinSeconds:withMinAccuracy:)` is the lookup that
-    // PushService + BackfillService use when a silent push for an old
-    // transaction finally lands. Returns nil rather than something stale
-    // — null is better than wrong.
+    // PushService, BackfillService and the location-push extension use when
+    // a wake for an old transaction finally lands. Returns nil rather than
+    // something stale — null is better than wrong.
+    //
+    // Storage itself lives in SharedLocationStore, in the App Group
+    // container, because the extension is a different process and can't
+    // read this one's UserDefaults.standard.
 
     private func appendToHistory(_ location: CLLocation) {
-        var history = locationHistory
-        history.append(LocationTrace(
-            lat: location.coordinate.latitude,
-            lng: location.coordinate.longitude,
-            timestamp: location.timestamp,
-            accuracy: max(0, location.horizontalAccuracy)
-        ))
-        let cutoff = Date().addingTimeInterval(-Self.maxHistoryAge)
-        history = history.filter { $0.timestamp >= cutoff }
-        if history.count > Self.maxHistorySize {
-            history = Array(history.suffix(Self.maxHistorySize))
-        }
-        if let data = try? JSONEncoder().encode(history) {
-            UserDefaults.standard.set(data, forKey: Self.historyKey)
-        }
+        SharedLocationStore.append(location)
     }
 
-    /// Look up the buffer entry closest in time to `target`, gated by
-    /// time window and accuracy. Returns nil when nothing qualifies —
-    /// callers should treat that as "we don't know" and mark the
-    /// transaction missed rather than guessing.
+    /// Look up the buffer entry closest in time to `target`. Thin passthrough
+    /// to `SharedLocationStore` — kept because the app's call sites
+    /// (PushService, BackfillService) reach for the service, while the
+    /// extension talks to the store directly.
     func closestEntry(
         to target: Date,
         withinSeconds: TimeInterval = 10 * 60,
         withMinAccuracy: Double = 100
     ) -> LocationTrace? {
-        let history = locationHistory
-        guard !history.isEmpty else { return nil }
-        let lo = target.addingTimeInterval(-withinSeconds)
-        let hi = target.addingTimeInterval(withinSeconds)
-        let candidates = history.filter {
-            $0.timestamp >= lo
-                && $0.timestamp <= hi
-                && $0.accuracy > 0
-                && $0.accuracy <= withMinAccuracy
-        }
-        guard !candidates.isEmpty else { return nil }
-        return candidates.min { a, b in
-            abs(a.timestamp.timeIntervalSince(target))
-                < abs(b.timestamp.timeIntervalSince(target))
-        }
+        SharedLocationStore.closestEntry(
+            to: target,
+            withinSeconds: withinSeconds,
+            withMinAccuracy: withMinAccuracy
+        )
     }
 
     // MARK: - Opportunistic capture
@@ -357,14 +374,15 @@ final class LocationService: NSObject, @unchecked Sendable {
     /// nothing anywhere near your spend, so both the silent-push Tier-1
     /// lookup and the foreground backfill miss and the row strands.
     ///
-    /// Foregrounding is the cheap fix: the user very often opens the app
-    /// within a couple of minutes of paying, and that moment is a legitimate
-    /// spend-time sample. Debounced on the same clock as the opportunistic
-    /// SLC capture so a burst of foreground/background cycles can't spin GPS.
+    /// Two callers, one implementation: foregrounding (the user very often
+    /// opens the app within a couple of minutes of paying) and an SLC wake
+    /// (upgrades that tick's ~500m reading to a ~30m one). They differ only
+    /// in how long they're willing to wait — a background wake shares its
+    /// window with the backfill that runs next.
     ///
     /// Failures are swallowed — this is best-effort buffer warming, never a
     /// blocking step.
-    func captureIntoBufferIfNeeded() async {
+    func captureIntoBufferIfNeeded(timeoutSeconds: TimeInterval = 8) async {
         lock.lock()
         let last = lastOpportunisticCaptureAt
         lock.unlock()
@@ -372,7 +390,7 @@ final class LocationService: NSObject, @unchecked Sendable {
         if let last,
            Date().timeIntervalSince(last) < Self.opportunisticDebounceSeconds {
             #if DEBUG
-            print("[LocationService] foreground capture skipped — last capture \(Int(Date().timeIntervalSince(last)))s ago")
+            print("[LocationService] buffer capture skipped — last capture \(Int(Date().timeIntervalSince(last)))s ago")
             #endif
             return
         }
@@ -381,52 +399,14 @@ final class LocationService: NSObject, @unchecked Sendable {
         lock.unlock()
 
         do {
-            _ = try await fetchOnce(minimumAccuracyMeters: 30, timeoutSeconds: 8)
+            _ = try await fetchOnce(minimumAccuracyMeters: 30, timeoutSeconds: timeoutSeconds)
             #if DEBUG
-            print("[LocationService] foreground capture: buffer warmed")
+            print("[LocationService] buffer warmed")
             #endif
         } catch {
             #if DEBUG
-            print("[LocationService] foreground capture failed (non-fatal): \(error)")
+            print("[LocationService] buffer capture failed (non-fatal): \(error)")
             #endif
-        }
-    }
-
-    private func opportunisticCaptureIfNeeded() {
-        lock.lock()
-        let last = lastOpportunisticCaptureAt
-        lock.unlock()
-
-        if let last,
-           Date().timeIntervalSince(last) < Self.opportunisticDebounceSeconds {
-            #if DEBUG
-            print("[LocationService] opportunistic skip — last capture \(Int(Date().timeIntervalSince(last)))s ago")
-            #endif
-            return
-        }
-        lock.lock()
-        lastOpportunisticCaptureAt = Date()
-        lock.unlock()
-
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                // Shorter timeout than the silent-push handler — we just
-                // want to upgrade the buffer; the background-task window
-                // from SLC is finite and we share it with the appendToHistory
-                // write that already happened.
-                let _ = try await self.fetchOnce(
-                    minimumAccuracyMeters: 30,
-                    timeoutSeconds: 6
-                )
-                #if DEBUG
-                print("[LocationService] opportunistic capture: appended to buffer")
-                #endif
-            } catch {
-                #if DEBUG
-                print("[LocationService] opportunistic capture failed (non-fatal): \(error)")
-                #endif
-            }
         }
     }
 }
@@ -445,10 +425,30 @@ extension LocationService: CLLocationManagerDelegate {
         // consumer; opportunistic capture would no-op anyway.
         if considerForOneShot(loc) { return }
 
-        // SLC tick with no in-flight one-shot. Kick off a brief
-        // high-accuracy capture so the buffer entry for this location
-        // gets upgraded from ~500m SLC to ~30m GPS. Debounced.
-        opportunisticCaptureIfNeeded()
+        // SLC tick with no in-flight one-shot. Two jobs, in this order:
+        //
+        //   1. Upgrade this location's buffer entry from the ~500m SLC
+        //      reading to a ~30m GPS one. Debounced.
+        //   2. Run the awaiting-backfill.
+        //
+        // Step 2 is what makes location capture survive Low Power Mode.
+        // iOS drops `content-available` pushes outright when Background App
+        // Refresh is off, so the silent-push wake never happens and rows sit
+        // `awaiting` until the 24h sweep calls them `missed`. An SLC wake is
+        // a *location* wake — gated on location authorization, not on
+        // Background App Refresh — so it still arrives, and the buffer it
+        // just warmed lets us ground the spend at the time it happened.
+        //
+        // Ordering is load-bearing: the capture must land in the buffer
+        // before the backfill reads it, which is why this awaits rather
+        // than firing both off in parallel.
+        Task { [weak self] in
+            // Shorter timeout than the foreground path — the background
+            // window from an SLC wake is finite and shared with the
+            // backfill's network round trips.
+            await self?.captureIntoBufferIfNeeded(timeoutSeconds: 6)
+            await BackfillService.shared.backfillAwaiting(trigger: .locationWake)
+        }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -475,42 +475,13 @@ extension LocationService: CLLocationManagerDelegate {
         }
         if status == .authorizedAlways || status == .authorizedWhenInUse {
             startSignificantChangeMonitoring()
+            // Location pushes need location authorization to be granted
+            // before iOS will mint a token, so this is the earliest honest
+            // moment to ask — and it re-runs on every upgrade of the
+            // authorization, which is exactly when a previous attempt would
+            // have failed.
+            startLocationPushMonitoring()
         }
-    }
-}
-
-/// One entry in the rolling location history. Stored as JSON in UserDefaults.
-///
-/// `accuracy` is the `horizontalAccuracy` of the source CLLocation in meters.
-/// SLC raw readings sit around 500m; foreground / opportunistic-fetchOnce
-/// captures get down to 10-30m. The buffer-lookup helper filters on this
-/// when deciding whether a stored entry is usable to ground a transaction.
-struct LocationTrace: Codable {
-    let lat: Double
-    let lng: Double
-    let timestamp: Date
-    /// Decoded as 0 (i.e. "perfect") on legacy entries that pre-date this
-    /// field. Old SLC-only entries are still useful as a coarse fallback
-    /// when nothing better is available.
-    var accuracy: Double = 0
-
-    enum CodingKeys: String, CodingKey {
-        case lat, lng, timestamp, accuracy
-    }
-
-    init(lat: Double, lng: Double, timestamp: Date, accuracy: Double) {
-        self.lat = lat
-        self.lng = lng
-        self.timestamp = timestamp
-        self.accuracy = accuracy
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.lat = try c.decode(Double.self, forKey: .lat)
-        self.lng = try c.decode(Double.self, forKey: .lng)
-        self.timestamp = try c.decode(Date.self, forKey: .timestamp)
-        self.accuracy = (try? c.decode(Double.self, forKey: .accuracy)) ?? 0
     }
 }
 
