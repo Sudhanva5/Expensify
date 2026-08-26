@@ -30,6 +30,11 @@ struct ExpensifyApp: App {
     @AppStorage(ThemePreference.storageKey) private var themeRaw: String =
         ThemePreference.system.rawValue
 
+    /// Scene lifecycle. This — not the app delegate's
+    /// `applicationDidBecomeActive(_:)` — is what actually fires in a
+    /// scene-based app, and the foreground location catchup hangs off it.
+    @Environment(\.scenePhase) private var scenePhase
+
     init() {
         // SwiftUI's `.tint(AppColor.tap)` on TabView SHOULD color the
         // selected tab — and in iOS 17 / earlier 18 it does. But the
@@ -84,6 +89,14 @@ struct ExpensifyApp: App {
                 .preferredColorScheme(
                     ThemePreference(rawValue: themeRaw)?.colorScheme
                 )
+                // Foreground catchup: warm the spend-time buffer, then ground
+                // any rows still awaiting a location. Lives here because the
+                // app-delegate callback it used to use is never delivered to
+                // scene-based apps — see AppDelegate.handleBecameActive.
+                .onChange(of: scenePhase) { _, phase in
+                    guard phase == .active else { return }
+                    AppDelegate.handleBecameActive()
+                }
         }
     }
 }

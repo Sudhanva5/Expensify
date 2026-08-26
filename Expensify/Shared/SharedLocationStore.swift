@@ -81,10 +81,44 @@ enum SharedLocationStore {
         ))
     }
 
-    /// Look up the buffer entry closest in time to `target`, gated by time
-    /// window and accuracy. Returns nil when nothing qualifies — callers
-    /// treat that as "we don't know", which is honest, where "here's where
-    /// the phone is now" would be a confident lie.
+    /// Widest gap we'll bridge when the fix is precise enough to be worth
+    /// extrapolating, and the accuracy that earns it.
+    ///
+    /// Why a second, wider pass exists: the ±10 min window was tuned for a
+    /// user in motion, and it fails the most common café case outright. A
+    /// Blue Tokai spend at 15:28 declined because the newest buffer entry was
+    /// 15:15:29 — 13 minutes earlier, at 8m accuracy, from the walk in. The
+    /// phone had been sitting still on a table ever since, so that entry was
+    /// near-perfect evidence and we threw it away by 3 minutes.
+    ///
+    /// Sitting still is exactly when the buffer goes quiet: SLC only fires on
+    /// ~500m of movement, so a stationary user generates no new entries no
+    /// matter how long they stay. The accuracy bar is tightened rather than
+    /// relaxed for this pass — bridging more time is only defensible when the
+    /// fix itself is precise, since a coarse fix plus a long gap compounds
+    /// two errors.
+    static let stationaryWindow: TimeInterval = 30 * 60
+    static let stationaryAccuracy: Double = 50
+
+    /// Look up the best buffer entry for `target`, gated by time window and
+    /// accuracy. Returns nil when nothing qualifies — callers treat that as
+    /// "we don't know", which is honest, where "here's where the phone is
+    /// now" would be a confident lie.
+    ///
+    /// Two passes, tight first: a recent entry always beats an older, more
+    /// precise one, because time-distance is the error that can't be
+    /// measured after the fact.
+    static func bestEntry(for target: Date) -> LocationTrace? {
+        if let tight = closestEntry(to: target, withinSeconds: 10 * 60, withMinAccuracy: 100) {
+            return tight
+        }
+        return closestEntry(
+            to: target,
+            withinSeconds: stationaryWindow,
+            withMinAccuracy: stationaryAccuracy
+        )
+    }
+
     static func closestEntry(
         to target: Date,
         withinSeconds: TimeInterval = 10 * 60,
@@ -127,28 +161,56 @@ enum SharedLocationStore {
     /// What a location-push wake managed to do. Recorded even when the
     /// answer is "nothing" — a decline is a successful wake, and telling
     /// the two apart is the entire point of this log.
+    ///
+    /// The decline cases are split because a single "declined" label made a
+    /// real failure unreadable: the Blue Tokai wake reported it, and it could
+    /// equally have meant authorization denied to the extension, a fix that
+    /// never arrived, or a fix too coarse to trust. Three very different
+    /// bugs, one string.
     enum WakeOutcome: String {
         /// Resolved from the spend-time buffer — the good path.
         case bufferHit = "buffer hit"
         /// Took a fresh fix because the spend was recent.
         case freshFix = "fresh fix"
-        /// Woke, but the spend was too old to answer honestly and the buffer
-        /// had nothing near it. Correct behaviour, not a failure.
-        case declined = "declined — no usable location"
+        /// Spend was too old for "now" to be a truthful answer, and the
+        /// buffer had nothing near it. Correct behaviour, not a failure.
+        case declinedStaleSpend = "declined — spend too old, buffer empty"
+        /// CoreLocation gave the extension nothing at all: authorization
+        /// withheld from a background process, or no fix inside the budget.
+        case declinedNoFix = "declined — no fix from CoreLocation"
+        /// A fix arrived but was too imprecise to attach to a transaction.
+        case declinedCoarse = "declined — fix too coarse"
         /// Payload wasn't a location request. Should never happen in practice.
         case badPayload = "unrecognised payload"
     }
 
-    static func recordWake(_ outcome: WakeOutcome) {
+    /// Location authorization as seen by whichever process last recorded it.
+    /// The extension's own view is the interesting one: an appex runs
+    /// backgrounded by definition, so "while using" there means CoreLocation
+    /// will hand it nothing and the fresh-fix tier can never work.
+    static let lastWakeAuthKey = "expensify.locationPushLastAuth"
+    static let lastWakeAccuracyKey = "expensify.locationPushLastAccuracy"
+
+    static func recordWake(
+        _ outcome: WakeOutcome,
+        authorization: String? = nil,
+        accuracy: Double? = nil
+    ) {
         let d = defaults
         d.set(d.integer(forKey: wakeCountKey) + 1, forKey: wakeCountKey)
         d.set(Date(), forKey: lastWakeAtKey)
         d.set(outcome.rawValue, forKey: lastWakeOutcomeKey)
+        if let authorization { d.set(authorization, forKey: lastWakeAuthKey) }
+        if let accuracy { d.set(accuracy, forKey: lastWakeAccuracyKey) }
     }
 
     static var wakeCount: Int { defaults.integer(forKey: wakeCountKey) }
     static var lastWakeAt: Date? { defaults.object(forKey: lastWakeAtKey) as? Date }
     static var lastWakeOutcome: String? { defaults.string(forKey: lastWakeOutcomeKey) }
+    static var lastWakeAuthorization: String? { defaults.string(forKey: lastWakeAuthKey) }
+    static var lastWakeAccuracy: Double? {
+        defaults.object(forKey: lastWakeAccuracyKey) as? Double
+    }
 
     // MARK: - Migration
 

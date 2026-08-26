@@ -30,10 +30,13 @@ import Foundation
 /// teaches iOS to stop waking us.
 final class LocationPushHandler: NSObject, CLLocationPushServiceExtension {
 
-    /// Hard ceiling on the fresh-fix attempt. Deliberately shorter than the
-    /// app's 15s one-shot: this process can be terminated at any moment and a
-    /// half-finished GPS lock is worth less than a clean completion.
-    private static let fixTimeout: TimeInterval = 8
+    /// Budget for the fresh-fix attempt. Was 8s, which never once produced a
+    /// usable fix — the first real test of this path (a café spend, phone
+    /// indoors on a table, GPS cold) came back empty and the row stranded.
+    /// A cold lock routinely needs 10s+, and the extension's own window is
+    /// wider than that, so the old ceiling was self-defeating: it guaranteed
+    /// a clean completion with nothing in it.
+    private static let fixTimeout: TimeInterval = 18
 
     /// Worst accuracy we'll accept from a fresh fix. `requestLocation` can
     /// hand back a cell-tower estimate hundreds of metres wide; uploading one
@@ -41,7 +44,12 @@ final class LocationPushHandler: NSObject, CLLocationPushServiceExtension {
     /// this bound we report nothing and let the SLC-wake backfill try later,
     /// which is the same "null beats wrong" rule the rest of the pipeline
     /// follows.
-    private static let maxAcceptableAccuracy: Double = 150
+    ///
+    /// 200m rather than 150m: the Places auto-rename downstream applies its
+    /// own 30m strict radius, so a coarse fix can never invent a merchant —
+    /// it only ever costs precision on the map pin, and a roughly-right pin
+    /// beats a blank row.
+    private static let maxAcceptableAccuracy: Double = 200
 
     private var completion: (() -> Void)?
     private var fix: LocationFix?
@@ -57,7 +65,7 @@ final class LocationPushHandler: NSObject, CLLocationPushServiceExtension {
             let kind = payload["kind"] as? String, kind == "request_location",
             let transactionId = payload["transactionId"] as? String
         else {
-            SharedLocationStore.recordWake(.badPayload)
+            SharedLocationStore.recordWake(.badPayload, authorization: authorizationLabel())
             finish()
             return
         }
@@ -84,12 +92,12 @@ final class LocationPushHandler: NSObject, CLLocationPushServiceExtension {
 
     private func resolve(transactionId: String, occurredAt: Date) async {
         // Tier 1 — the buffer already knows where the user was when they paid.
-        if let entry = SharedLocationStore.closestEntry(
-            to: occurredAt,
-            withinSeconds: 10 * 60,
-            withMinAccuracy: 100
-        ) {
-            SharedLocationStore.recordWake(.bufferHit)
+        if let entry = SharedLocationStore.bestEntry(for: occurredAt) {
+            SharedLocationStore.recordWake(
+                .bufferHit,
+                authorization: authorizationLabel(),
+                accuracy: entry.accuracy
+            )
             await upload(transactionId: transactionId, lat: entry.lat, lng: entry.lng)
             return
         }
@@ -98,21 +106,34 @@ final class LocationPushHandler: NSObject, CLLocationPushServiceExtension {
         // phone's current position is still an honest answer.
         let spendAge = -occurredAt.timeIntervalSinceNow
         guard spendAge <= 2 * 60 else {
-            SharedLocationStore.recordWake(.declined)
+            SharedLocationStore.recordWake(.declinedStaleSpend, authorization: authorizationLabel())
             return
         }
 
         let fix = LocationFix()
         self.fix = fix
-        guard let location = await fix.current(
+        let attempt = await fix.current(
             maxAcceptableAccuracy: Self.maxAcceptableAccuracy,
             timeout: Self.fixTimeout
-        ) else {
-            SharedLocationStore.recordWake(.declined)
+        )
+        guard let location = attempt.location else {
+            // Distinguish "CoreLocation gave us nothing" from "it gave us
+            // something unusable" — the first points at authorization or
+            // budget, the second at the accuracy bar. Both looked identical
+            // in the log that shipped yesterday.
+            SharedLocationStore.recordWake(
+                attempt.rejectedAccuracy == nil ? .declinedNoFix : .declinedCoarse,
+                authorization: authorizationLabel(),
+                accuracy: attempt.rejectedAccuracy
+            )
             return
         }
 
-        SharedLocationStore.recordWake(.freshFix)
+        SharedLocationStore.recordWake(
+            .freshFix,
+            authorization: authorizationLabel(),
+            accuracy: location.horizontalAccuracy
+        )
         // Feed the buffer as well: this fix is also evidence for any *other*
         // row that lands near this timestamp, and in Low Power Mode the app
         // itself may not run for hours.
@@ -147,6 +168,20 @@ final class LocationPushHandler: NSObject, CLLocationPushServiceExtension {
         completion()
     }
 
+    /// Authorization from inside the extension. The app's view can differ in
+    /// the way that matters: "while using" leaves a backgrounded appex with
+    /// no location at all, which is invisible from the app side.
+    private func authorizationLabel() -> String {
+        switch CLLocationManager().authorizationStatus {
+        case .authorizedAlways: return "always"
+        case .authorizedWhenInUse: return "while using"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        case .notDetermined: return "not determined"
+        @unknown default: return "unknown"
+        }
+    }
+
     private static func parseOccurredAt(_ iso: String?) -> Date {
         guard let iso else { return Date() }
         let withFraction = ISO8601DateFormatter()
@@ -156,7 +191,7 @@ final class LocationPushHandler: NSObject, CLLocationPushServiceExtension {
     }
 }
 
-/// Minimal one-shot location request for the extension.
+/// One-shot location request for the extension, reporting why it failed.
 ///
 /// Deliberately NOT a copy of `LocationService.fetchOnce`. That one streams
 /// updates via `startUpdatingLocation()` and leans on
@@ -166,12 +201,25 @@ final class LocationPushHandler: NSObject, CLLocationPushServiceExtension {
 /// declaring, and setting it without one traps at runtime.
 ///
 /// So this uses `requestLocation()`, the call Apple's own location-push
-/// template uses, and applies the quality bar afterwards instead of waiting
-/// for a better reading that a streamed session would have provided.
+/// template uses, and retries it within the budget. One shot was not enough:
+/// the first reading of a cold session is often a wide cell-tower estimate,
+/// and returning that single sample as the verdict is what made this path
+/// fail on its first real use.
 private final class LocationFix: NSObject, CLLocationManagerDelegate {
+
+    /// Outcome of an attempt. `rejectedAccuracy` is set when readings did
+    /// arrive but none cleared the bar — that distinction is the difference
+    /// between "authorization/budget problem" and "accuracy problem", which
+    /// a bare nil could not express.
+    struct Attempt {
+        let location: CLLocation?
+        let rejectedAccuracy: Double?
+    }
+
     private let manager = CLLocationManager()
-    private var continuation: CheckedContinuation<CLLocation?, Never>?
-    private var maxAccuracy: Double = 150
+    private var continuation: CheckedContinuation<Attempt, Never>?
+    private var maxAccuracy: Double = 200
+    private var bestRejected: CLLocation?
     private var timeoutTask: Task<Void, Never>?
     private let lock = NSLock()
 
@@ -181,19 +229,19 @@ private final class LocationFix: NSObject, CLLocationManagerDelegate {
         manager.desiredAccuracy = kCLLocationAccuracyBest
     }
 
-    func current(maxAcceptableAccuracy: Double, timeout: TimeInterval) async -> CLLocation? {
+    func current(maxAcceptableAccuracy: Double, timeout: TimeInterval) async -> Attempt {
         maxAccuracy = maxAcceptableAccuracy
-        return await withCheckedContinuation { (cont: CheckedContinuation<CLLocation?, Never>) in
+        return await withCheckedContinuation { (cont: CheckedContinuation<Attempt, Never>) in
             lock.lock()
             continuation = cont
             lock.unlock()
 
             timeoutTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                // Give up rather than hang. The caller's completion handler is
+                // Give up rather than hang: the caller's completion handler is
                 // what tells iOS this wake finished cleanly, and an extension
                 // that never completes stops getting woken.
-                self?.resume(with: nil)
+                self?.finish(with: nil)
             }
 
             manager.requestLocation()
@@ -201,38 +249,65 @@ private final class LocationFix: NSObject, CLLocationManagerDelegate {
     }
 
     func cancel() {
-        resume(with: nil)
+        finish(with: nil)
     }
 
-    private func resume(with location: CLLocation?) {
+    /// Resolve once. `accepted` nil means we failed; the rejected-accuracy
+    /// field still carries the best thing we saw so the log can say which
+    /// kind of failure it was.
+    private func finish(with accepted: CLLocation?) {
         lock.lock()
         let cont = continuation
         continuation = nil
+        let rejected = bestRejected
         lock.unlock()
         guard let cont else { return }
         timeoutTask?.cancel()
-        cont.resume(returning: location)
+        cont.resume(returning: Attempt(
+            location: accepted,
+            rejectedAccuracy: accepted == nil ? rejected?.horizontalAccuracy : nil
+        ))
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let loc = locations.last, loc.horizontalAccuracy >= 0 else {
-            resume(with: nil)
+            manager.requestLocation()
             return
         }
 
-        // Same trap as the app: the first reading of any session is often a
+        // Same trap as the app: the first reading of a session is often a
         // cached cell-tower fix from minutes ago, i.e. where the user was
-        // before they arrived.
+        // before they arrived. Ask again rather than accept it.
         if -loc.timestamp.timeIntervalSinceNow > 30 {
-            resume(with: nil)
+            manager.requestLocation()
             return
         }
 
-        resume(with: loc.horizontalAccuracy <= maxAccuracy ? loc : nil)
+        if loc.horizontalAccuracy <= maxAccuracy {
+            finish(with: loc)
+            return
+        }
+
+        // Too coarse: remember it as evidence for the log, then ask again.
+        // GPS sharpens over the first several seconds, so the second or third
+        // reading inside the budget is frequently the one that clears the bar.
+        lock.lock()
+        if bestRejected == nil || loc.horizontalAccuracy < bestRejected!.horizontalAccuracy {
+            bestRejected = loc
+        }
+        lock.unlock()
+        manager.requestLocation()
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        // A denial is terminal — retrying would just burn the budget. Anything
+        // else is transient often enough to be worth another ask.
+        if let clError = error as? CLError, clError.code == .denied {
+            NSLog("[LocationPush] location denied to extension")
+            finish(with: nil)
+            return
+        }
         NSLog("[LocationPush] location error: %@", String(describing: error))
-        resume(with: nil)
+        manager.requestLocation()
     }
 }

@@ -288,7 +288,12 @@ struct DiagnosticsView: View {
             return "none recorded"
         }
         let outcome = SharedLocationStore.lastWakeOutcome ?? "unknown"
-        return "\(count) total — last \(relativeTime(last)): \(outcome)"
+        // Authorization as the EXTENSION saw it. "while using" here is the
+        // silent killer: a backgrounded appex gets no location at all, and
+        // nothing on the app side would ever show it.
+        let auth = SharedLocationStore.lastWakeAuthorization.map { " · auth \($0)" } ?? ""
+        let acc = SharedLocationStore.lastWakeAccuracy.map { " · \(Int($0))m" } ?? ""
+        return "\(count) total — last \(relativeTime(last)): \(outcome)\(auth)\(acc)"
     }
 
     private var locationAuthDetail: String {

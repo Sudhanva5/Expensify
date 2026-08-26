@@ -73,10 +73,19 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         }
     }
 
-    /// Every time the app foregrounds — runs the foreground backfill so any
-    /// transactions stuck in 'awaiting' (because LPM, force-quit, or APNs
-    /// throttling killed the silent push) get caught up.
-    func applicationDidBecomeActive(_ application: UIApplication) {
+    /// Everything that should happen when the app becomes active.
+    ///
+    /// NOT called from `applicationDidBecomeActive(_:)` any more. This app is
+    /// scene-based (SwiftUI `App` + a generated `UIApplicationSceneManifest`),
+    /// and UIKit does not deliver the non-scene lifecycle callbacks to the app
+    /// delegate in that configuration — so that method had never run, and the
+    /// foreground catchup it was supposed to drive had never happened. The
+    /// evidence: on a day with rows sitting `awaiting`, every single
+    /// `GET /transactions/awaiting` in the server logs came from the SLC path
+    /// on its 5-minute cadence, and opening the app produced none at all.
+    ///
+    /// `ExpensifyApp` now drives this from `scenePhase`, which does fire.
+    static func handleBecameActive() {
         // Foregrounding after backgrounding — same hygiene as cold launch.
         // Pre-warm the HTTPClient connection (helps if TCP was dropped while
         // backgrounded) and run the location backfill for awaiting txns.

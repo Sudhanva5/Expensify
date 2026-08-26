@@ -92,11 +92,7 @@ actor BackfillService {
         var bufferHits = 0
         var stillNeedingNow: [APIClient.AwaitingTransaction] = []
         for awaiting in awaitingList {
-            if let entry = LocationService.shared.closestEntry(
-                to: awaiting.occurredAt,
-                withinSeconds: 10 * 60,
-                withMinAccuracy: 100
-            ) {
+            if let entry = LocationService.shared.bestEntry(for: awaiting.occurredAt) {
                 await upload(entry: entry, for: awaiting.id, occurredAt: awaiting.occurredAt)
                 bufferHits += 1
             } else if awaiting.occurredAt >= Date().addingTimeInterval(-Self.recentWindow) {

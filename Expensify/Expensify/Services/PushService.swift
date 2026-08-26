@@ -162,11 +162,7 @@ final class PushService: NSObject, UNUserNotificationCenterDelegate {
         }()
 
         // Tier 1 — spend-time buffer match.
-        if let entry = LocationService.shared.closestEntry(
-            to: occurredAt,
-            withinSeconds: 10 * 60,
-            withMinAccuracy: 100
-        ) {
+        if let entry = LocationService.shared.bestEntry(for: occurredAt) {
             let city = await LocationService.reverseGeocode(
                 CLLocation(latitude: entry.lat, longitude: entry.lng)
             )

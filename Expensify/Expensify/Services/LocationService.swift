@@ -358,6 +358,14 @@ final class LocationService: NSObject, @unchecked Sendable {
         )
     }
 
+    /// The policy lookup: tight window first, then a wider one for precise
+    /// fixes. Prefer this over `closestEntry` — sitting still in a café
+    /// produces no new buffer entries, so the tight window alone strands
+    /// exactly the spends this app exists to explain.
+    func bestEntry(for target: Date) -> LocationTrace? {
+        SharedLocationStore.bestEntry(for: target)
+    }
+
     // MARK: - Opportunistic capture
     //
     // Triggered on every SLC wakeup (delegate `didUpdateLocations` when no
