@@ -147,6 +147,22 @@ export function stripHtml(html: string): string {
 const HDFC_FROM_PATTERNS = [
   /alerts@hdfcbank\.net/i,
   /noreply\.alerts@hdfcbank\.net/i,
+  // RBI's `.bank.in` mandate moved HDFC's alert mail off @hdfcbank.net —
+  // by Jul 2026 nothing arrives on the old domain at all. The pipeline
+  // only kept working because the From header carried a "HDFC Bank
+  // InstaAlerts" display name that the pattern below happens to match; on
+  // 31 Aug 2026 two alerts (a Rs.65,000 UPI debit and a deposit credit)
+  // arrived with the display name stripped and were dropped as
+  // skipped_non_hdfc — silently, since that branch records no
+  // EmailMessage row and fires no parser-miss alert. The domain has to
+  // stand on its own.
+  //
+  // Host-exact on both sides, deliberately: the leading `@` keeps the
+  // mailers.*/updates.* marketing subdomains (SmartEMI, loan offers,
+  // vouchers — ~113 blasts in 60 days) out of the parser chain, and the
+  // trailing lookahead keeps a lookalike like `@hdfcbank.bank.in.evil.com`
+  // from riding in on a substring match.
+  /@hdfcbank\.bank\.in(?=[>,;\s]|$)/i,
   /\bHDFC Bank\b/i,
 ];
 
